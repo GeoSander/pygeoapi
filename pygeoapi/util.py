@@ -30,6 +30,7 @@
 """Generic util functions used in the code"""
 
 import base64
+from copy import deepcopy
 from typing import List
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -121,6 +122,17 @@ def yaml_load(fh: IO) -> dict:
     # https://stackoverflow.com/a/55301129
     path_matcher = re.compile(r'.*\$\{([^}^{]+)\}.*')
 
+    def force_string_keys(data):
+        copy = {}
+        if isinstance(data, dict):
+            for k, v in data.items():
+                key = str(k)
+                if isinstance(v, dict):
+                    copy[key] = force_string_keys(v)
+                else:
+                    copy[key] = deepcopy(v)
+        return copy
+
     def path_constructor(loader, node):
         env_var = path_matcher.match(node.value).group(1)
         if env_var not in os.environ:
@@ -134,7 +146,8 @@ def yaml_load(fh: IO) -> dict:
     EnvVarLoader.add_implicit_resolver('!path', path_matcher, None)
     EnvVarLoader.add_constructor('!path', path_constructor)
 
-    return yaml.load(fh, Loader=EnvVarLoader)
+    result = yaml.load(fh, Loader=EnvVarLoader)
+    return force_string_keys(result)
 
 
 def str2bool(value: Union[bool, str]) -> bool:
