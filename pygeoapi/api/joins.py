@@ -26,6 +26,7 @@
 #
 # =================================================================
 
+import re
 import io
 import csv
 import json
@@ -35,7 +36,7 @@ from copy import deepcopy
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Any, Optional, BinaryIO, re
+from typing import Tuple, Any, Optional, BinaryIO
 import urllib
 
 from pygeoapi import l10n
@@ -118,7 +119,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
     :returns: `tuple` of `list` of tag objects, and `dict` of path objects
     """
 
-    from pygeoapi.openapi import OPENAPI_YAML, get_visible_collections, get_oas_30_parameters
+    from pygeoapi.openapi import get_visible_collections, get_oas_30_parameters
 
     LOGGER.debug('setting up joins endpoints')
 
@@ -157,34 +158,174 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 {'$ref': '#/components/parameters/f'},
                 # {'$ref': '#/components/parameters/lang'},
             ],
-            # 'requestBody': {
-            #     'required': True,
-            #     'content': {
-            #         'application/json': {
-            #             'schema': {
-            #                 'type': 'object',
-            #                 'properties': {
-            #                     'leftCollection': {'type': 'string'},
-            #                     'rightCollection': {'type': 'string'},
-            #                     'joinType': {'type': 'string', 'enum': ['inner', 'outer', 'left', 'right']},
-            #                     'on': {'type': 'array', 'items': {'type': 'string'}}
-            #                 }
-            #             }
-            #         }
-            #     }
-            # },
-            'responses': {
-                '201': {
-                    'description': 'Response',
-                    'content': {
-                        'application/json': {}
+            'requestBody': {
+                'required': True,
+                'content': {
+                    'multipart/form-data': {
+                        'schema': {
+                            'type': 'object',
+                            'required': [
+                                'left-dataset-url',
+                                'left-dataset-key',
+                                'right-dataset-format',
+                                'right-dataset-file',
+                                'right-dataset-key'
+                            ],
+                            'properties': {
+                                'left-dataset-url': {
+                                    'type': 'string',
+                                    'format': 'uri',
+                                    'description': 'The URL for the OGC API collection (left dataset)',
+                                    'example': 'http://localhost:5000/collections/my-collection'
+                                },
+                                'left-dataset-key': {
+                                    'type': 'string',
+                                    'description': 'The primary key field in the left dataset (collection) that contains the key values for joining'
+                                },
+                                'right-dataset-format': {
+                                    'type': 'string',
+                                    'description': 'The format (i.e. mime type) of the right dataset file',
+                                    'enum': ['text/csv'],
+                                    'default': 'text/csv'
+                                },
+                                'right-dataset-file': {
+                                    'type': 'string',
+                                    'format': 'binary',
+                                    'description': 'The right dataset file to upload (CSV format)'
+                                },
+                                'right-dataset-key': {
+                                    'type': 'string',
+                                    'description': 'The foreign key field in the right dataset (CSV) that contains the key values for joining'
+                                },
+                                'right-dataset-field-list': {
+                                    'type': 'string',
+                                    'description': 'Comma-separated list of field names from the right dataset to include in the join result. If not specified, all fields are included.',
+                                    'example': 'name,population,area'
+                                },
+                                'csv-file-delimiter': {
+                                    'type': 'string',
+                                    'description': 'The delimiter character used in the CSV file',
+                                    'default': ',',
+                                    'example': ','
+                                },
+                                'csv-file-header-row-number': {
+                                    'type': 'integer',
+                                    'description': 'The 1-based row number of the header row in the CSV file',
+                                    'default': 1,
+                                    'minimum': 1
+                                },
+                                'csv-file-data-start-row-number': {
+                                    'type': 'integer',
+                                    'description': 'The 1-based row number where data starts in the CSV file',
+                                    'default': 2,
+                                    'minimum': 1
+                                }
+                            }
+                        },
+                        'encoding': {
+                            'right-dataset-file': {
+                                'contentType': 'text/csv, application/csv'
+                            }
+                        }
                     }
                 }
+            },
+            'responses': {
+                '201': {
+                    'description': 'Join created successfully',
+                    'content': {
+                        'application/json': {
+                            # 'schema': {
+                            #     'type': 'object',
+                            #     'properties': {
+                            #         'id': {
+                            #             'type': 'string',
+                            #             'description': 'Unique identifier for the created join',
+                            #             'example': 'leftDatasetName-rightDatasetName-1'
+                            #         },
+                            #         'metadata': {
+                            #             'type': 'object',
+                            #             'properties': {
+                            #                 'id': {'type': 'string'},
+                            #                 'created': {
+                            #                     'type': 'string',
+                            #                     'format': 'date-time'
+                            #                 },
+                            #                 'leftDataset': {
+                            #                     'type': 'object',
+                            #                     'properties': {
+                            #                         'name': {'type': 'string'},
+                            #                         'key': {'type': 'string'}
+                            #                     }
+                            #                 },
+                            #                 'rightDataset': {
+                            #                     'type': 'object',
+                            #                     'properties': {
+                            #                         'name': {'type': 'string'},
+                            #                         'key': {'type': 'string'},
+                            #                         'format': {'type': 'string'},
+                            #                         'delimiter': {'type': 'string'},
+                            #                         'headerRow': {'type': 'integer'},
+                            #                         'dataStartRow': {'type': 'integer'}
+                            #                     }
+                            #                 },
+                            #                 'parameters': {
+                            #                     'type': 'object',
+                            #                     'properties': {
+                            #                         'includeFields': {
+                            #                             'type': 'array',
+                            #                             'items': {'type': 'string'}
+                            #                         }
+                            #                     }
+                            #                 },
+                            #                 'result': {
+                            #                     'type': 'object',
+                            #                     'properties': {
+                            #                         'path': {'type': 'string'},
+                            #                         'format': {'type': 'string'}
+                            #                     }
+                            #                 },
+                            #                 'statistics': {
+                            #                     'type': 'object',
+                            #                     'properties': {
+                            #                         'numberMatched': {
+                            #                             'type': 'integer',
+                            #                             'description': 'Number of left dataset records matched with right dataset'
+                            #                         },
+                            #                         'numberOfUnmatchedLeftItems': {
+                            #                             'type': 'integer',
+                            #                             'description': 'Number of left dataset records without a match'
+                            #                         },
+                            #                         'numberOfUnmatchedRightItems': {
+                            #                             'type': 'integer',
+                            #                             'description': 'Number of right dataset records without a match'
+                            #                         }
+                            #                     }
+                            #                 }
+                            #             }
+                            #         }
+                            #     }
+                            # }
+                        }
+                    }
+                },
+                '400': {'$ref': '#/components/responses/BadRequest'},
+                '404': {'$ref': '#/components/responses/NotFound'},
+                '500': {'$ref': '#/components/responses/ServerError'}
             }
         }
     }
 
     # Joins endpoint (join metadata and delete)
+    join_id_param = {
+        'name': 'joinId',
+        'in': 'path',
+        'description': 'Join identifier',
+        'required': True,
+        'schema': {
+            'type': 'string'
+        }
+    }
     paths[f'/{API_NAME}/{{joinId}}'] = {
         'get': {
             'summary': f'Get metadata for a join with the given id',
@@ -192,6 +333,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
             'tags': [API_NAME],
             'operationId': 'getJoinMetadata',
             'parameters': [
+                join_id_param,
                 {'$ref': '#/components/parameters/f'},
                 # {'$ref': '#/components/parameters/lang'},
             ],
@@ -210,6 +352,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
             'tags': [API_NAME],
             'operationId': 'deleteJoin',
             'parameters': [
+                join_id_param,
                 {'$ref': '#/components/parameters/f'},
                 # {'$ref': '#/components/parameters/lang'},
             ],
@@ -232,6 +375,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
             'tags': [API_NAME],
             'operationId': 'getJoinResults',
             'parameters': [
+                join_id_param,
                 {'$ref': '#/components/parameters/f'},
                 # {'$ref': '#/components/parameters/lang'},
             ],
@@ -259,7 +403,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 'summary': f'Get {title} join key fields',
                 'description': f'Lists all available {title} join key fields',
                 'tags': [k, API_NAME],
-                'operationId': 'getKeys',
+                'operationId': f'get{k.capitalize()}Keys',
                 'parameters': [
                     {'$ref': '#/components/parameters/f'},
                     # {'$ref': '#/components/parameters/lang'},
@@ -292,7 +436,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 'summary': f'Get {title} values for a given join key field id',
                 'description': description,
                 'tags': [k, API_NAME],
-                'operationId': 'getKeyValues',
+                'operationId': f'get{k.capitalize()}KeyValues',
                 'parameters': [
                     key_field_param,
                     {'$ref': '#/components/parameters/f'},
@@ -430,7 +574,7 @@ def generate_unique_join_name(
 def save_join_result(
         join_name: str,
         joined_geojson: dict[str, Any],
-        output_path: str,
+        # output_path: str,
         left_dataset_name: str,
         right_dataset_name: str,
         left_dataset_key: str,
@@ -464,13 +608,14 @@ def save_join_result(
 
     # Step 1: Save the joined GeoJSON to disk
     try:
-        output_file = Path(output_path)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_parent_dir = get_joins_file_path(working_dir).parent / 'joins'
+        output_parent_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_parent_dir / f'{join_name}.geojson'
 
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(joined_geojson, f, ensure_ascii=False, indent=2)
 
-        LOGGER.info(f'Saved join result to: {output_path}')
+        LOGGER.info(f'Saved join result to: {output_file}')
     except IOError as e:
         raise ValueError(f'Failed to save join result: {e}')
 
@@ -494,7 +639,7 @@ def save_join_result(
             'includeFields': include_fields or []
         },
         'result': {
-            'path': str(output_path),
+            'path': str(output_file),
             'format': 'application/geo+json'
         },
         'statistics': statistics
@@ -556,29 +701,6 @@ def _remove_join(
     return True
 
 
-def _parse_multipart_form_data(request) -> dict:
-    """
-    Parse multipart form data from Flask request.
-
-    :param request: Flask request object
-
-    :returns: Dictionary with form fields and files
-    """
-    form_data = {}
-
-    # Parse form fields
-    if hasattr(request, 'form'):
-        for key, value in request.form.items():
-            form_data[key] = value
-
-    # Parse files
-    if hasattr(request, 'files'):
-        for key, file in request.files.items():
-            form_data[key] = file
-
-    return form_data
-
-
 def _validate_join_parameters(form_data: dict) -> Tuple[bool, Optional[str]]:
     """
     Validate required join parameters from form data.
@@ -628,9 +750,46 @@ def list_joins(api: API, request: APIRequest) -> Tuple[dict, int, str]:
         #     if metadata.get('leftDataset', {}).get('name') == dataset
         # }
 
+        # Build the joins list with proper structure
+        joins_list = []
+        for join_name, metadata in all_joins.items():
+            # dataset = metadata['leftDataset']['name']
+            join_item = {
+                'id': join_name,
+                'timeStamp': metadata['created'],
+                'links': [
+                    {
+                        # 'href': f"{api.get_collections_url()}/{dataset}/joins/{join_name}",
+                        'href': f'{api.base_url}/joins/{join_name}',
+                        'rel': 'self',
+                        'type': 'application/json',
+                        'title': f'Join metadata of {join_name}'
+                    },
+                    {
+                        # 'href': f"{api.get_collections_url()}/{dataset}/joins/{join_name}/results",
+                        'href': f'{api.base_url}/joins/{join_name}',
+                        'rel': 'results',
+                        'type': 'application/geo+json',
+                        'title': f'Results for join {join_name}'
+                    }
+                ]
+            }
+            joins_list.append(join_item)
+
+        # Build the response with proper structure
         response = {
-            'joins': all_joins,  # dataset_joins,
-            'count': len(all_joins),  # len(dataset_joins)
+            'links': [
+                {
+                    'href': f'{api.base_url}/joins?f=json',
+                    'rel': 'self',
+                    'type': 'application/json',
+                    'title': 'This document as JSON'
+                }
+            ],
+            'joins': joins_list,
+            'numberMatched': len(joins_list),
+            'numberReturned': len(joins_list),
+            'timeStamp': datetime.utcnow().isoformat() + 'Z'
         }
 
         return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
@@ -654,7 +813,75 @@ def get_join_metadata(api: API, request: APIRequest,
 
     :returns: tuple of headers, status code, content
     """
-    return {}, 200, "{}"
+    headers = request.get_response_headers(**api.api_headers) if hasattr(request, 'get_response_headers') else {}
+
+    try:
+        working_dir = api.config.get('server', {}).get('workingdir', os.getcwd())
+        join_metadata = load_joins_metadata(working_dir).get(join_id)
+
+        if not join_metadata:
+            msg = f'Join not found: {join_id}'
+            return api.get_exception(
+                HTTPStatus.NOT_FOUND, headers, F_JSON,
+                'NotFound', msg
+            )
+
+        # # Verify the join belongs to this dataset
+        # if join_metadata.get('leftDataset', {}).get('name') != dataset:
+        #     msg = f'Join {join_name} does not belong to collection {dataset}'
+        #     return api.get_exception(
+        #         HTTPStatus.NOT_FOUND, headers, F_JSON,
+        #         'NotFound', msg
+        #     )
+
+        response = {
+            'links': [
+                {
+                    'href': f'{api.base_url}/joins/{join_id}?f=json',
+                    'rel': 'self',
+                    'type': 'application/json',
+                    'title': 'This document as JSON'
+                }
+            ],
+            'join': {
+                "id": join_metadata['id'],
+                "timeStamp": join_metadata['created'],
+                # "inputs": {
+                #     "attributeDataset": "string",
+                #     "collection": [
+                #         {
+                #             "href": "string",
+                #             "rel": "string",
+                #             "type": "string",
+                #             "hreflang": "string",
+                #             "title": "string",
+                #             "length": 0
+                #         }
+                #     ]
+                # },
+                # "outputs": [
+                #     {
+                #         "href": "string",
+                #         "rel": "string",
+                #         "type": "string",
+                #         "hreflang": "string",
+                #         "title": "string",
+                #         "length": 0
+                #     }
+                # ],
+                "joinInformation": join_metadata['statistics']
+            }
+        }
+
+        return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
+
+    except Exception as e:
+        LOGGER.error(f'Failed to retrieve join: {e}', exc_info=True)
+        msg = f'Failed to retrieve join: {str(e)}'
+        return api.get_exception(
+            HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
+            'NoApplicableCode', msg
+        )
 
 
 def perform_geojson_csv_join_from_stream(
@@ -710,7 +937,7 @@ def perform_geojson_csv_join_from_stream(
 
     # Step 2: Read CSV stream into a dictionary for O(1) lookup
     csv_lookup: dict[str, dict[str, Any]] = {}
-    csv_fieldnames: list[str] = []
+    csv_fieldnames: list[str]
 
     try:
         # Wrap binary stream in TextIOWrapper for reading
@@ -799,7 +1026,7 @@ def perform_geojson_csv_join_from_stream(
         raise ValueError(f'Failed to read CSV stream: {e}')
 
     total_csv_records = len(csv_lookup)
-    LOGGER.debug(f'CSV lookup contains {total_csv_records} unique keys')
+    print(f'CSV lookup contains {total_csv_records} unique keys')
 
     # Step 3: Perform left join and collect statistics
     matched_count = 0
@@ -848,7 +1075,7 @@ def perform_geojson_csv_join_from_stream(
         'numberOfUnmatchedRightItems': unmatched_right_count
     }
 
-    LOGGER.info(
+    print(
         f'Join completed: {matched_count} matched, '
         f'{unmatched_left_count} unmatched left, '
         f'{unmatched_right_count} unmatched right'
@@ -875,7 +1102,7 @@ def create_join(api: API, request: APIRequest) -> Tuple[dict, int, str]:
 
     try:
         # Step 1: Parse multipart form data
-        form_data = _parse_multipart_form_data(request)
+        form_data = request.form
 
         # Step 2: Validate parameters
         is_valid, error_msg = _validate_join_parameters(form_data)
@@ -887,7 +1114,9 @@ def create_join(api: API, request: APIRequest) -> Tuple[dict, int, str]:
             )
 
         # Step 3: Extract parameters
-        dataset = form_data['left-dataset-url'].lstrip(api.get_collections_url()).strip('/')
+        print(form_data['left-dataset-url'])
+        print(api.get_collections_url())
+        dataset = form_data['left-dataset-url'].removeprefix(api.get_collections_url()).strip('/')
         if dataset not in collections:
             msg = f'Collection (left dataset) not found: {dataset}'
             return api.get_exception(
@@ -911,10 +1140,9 @@ def create_join(api: API, request: APIRequest) -> Tuple[dict, int, str]:
 
         # Parse include fields
         include_fields = None
-        if 'right-dataset-data-value-list' in form_data:
-            fields_str = form_data['right-dataset-data-value-list']
-            if fields_str:
-                include_fields = [f.strip() for f in fields_str.split(',') if f.strip()]
+        fields_str = form_data.get('right-dataset-field-list', '')
+        if fields_str:
+            include_fields = [f.strip() for f in fields_str.split(',') if f.strip()]
 
         LOGGER.info(f'Executing join for collection: {dataset}')
         LOGGER.debug(f'Left key: {left_dataset_key}, Right key: {right_dataset_key}')
@@ -922,7 +1150,7 @@ def create_join(api: API, request: APIRequest) -> Tuple[dict, int, str]:
         # Step 4: Get provider and fetch data
         try:
             provider_def = get_provider_by_type(
-                collections[dataset]['providers']['providers'], 'feature'
+                collections[dataset]['providers'], 'feature'
             )
             provider = load_plugin('provider', provider_def)
         except ProviderTypeError:
@@ -954,8 +1182,6 @@ def create_join(api: API, request: APIRequest) -> Tuple[dict, int, str]:
             csv_file.seek(0)
 
         # Step 6: Perform the join
-        from pygeoapi.util import perform_geojson_csv_join_from_stream
-
         joined_geojson, statistics = perform_geojson_csv_join_from_stream(
             geojson_data=result,
             csv_stream=csv_file.stream if hasattr(csv_file, 'stream') else csv_file,
@@ -970,6 +1196,7 @@ def create_join(api: API, request: APIRequest) -> Tuple[dict, int, str]:
 
         # Step 7: Generate unique join name
         working_dir = api.config.get('server', {}).get('workingdir', os.getcwd())
+        print(working_dir)
         join_name = generate_unique_join_name(
             left_dataset_name=dataset,
             right_dataset_name=right_dataset_name,
@@ -1024,86 +1251,127 @@ def create_join(api: API, request: APIRequest) -> Tuple[dict, int, str]:
             HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
             'NoApplicableCode', msg
         )
+    #
+    #
+    #
+    # if dataset not in collections.keys():
+    #     msg = 'Collection not found'
+    #     return api.get_exception(
+    #         HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', msg)
+    #
+    # try:
+    #     # Get the provider
+    #     provider_def = get_provider_by_type(
+    #         collections[dataset]['providers'], 'feature')
+    #     p = load_plugin('provider', provider_def)
+    #
+    #     # Query all features from provider
+    #     LOGGER.debug(f'Fetching features from collection: {dataset}')
+    #     result = p.query(limit=10000)  # Adjust limit as needed
+    #
+    #     if 'features' not in result:
+    #         msg = 'Provider did not return features'
+    #         return api.get_exception(
+    #             HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
+    #             'NoApplicableCode', msg)
+    #
+    #     # Perform the join
+    #     joined_geojson, statistics = perform_geojson_csv_join_from_stream(
+    #         geojson_data=result,
+    #         csv_stream=csv_stream,
+    #         geojson_key=geojson_key,
+    #         csv_key=csv_key,
+    #         csv_delimiter=csv_delimiter,
+    #         csv_encoding=csv_encoding
+    #     )
+    #
+    #     # Build response
+    #     content = {
+    #         'type': 'FeatureCollection',
+    #         'features': joined_geojson.get('features', []),
+    #         'statistics': statistics,
+    #         'numberMatched': statistics['numberMatched'],
+    #         'numberOfUnmatchedLeftItems': statistics['numberOfUnmatchedLeftItems'],
+    #         'numberOfUnmatchedRightItems': statistics['numberOfUnmatchedRightItems']
+    #     }
+    #
+    #     return headers, HTTPStatus.CREATED, to_json(content, api.pretty_print)
+    #
+    # except ProviderTypeError:
+    #     msg = 'Invalid provider type'
+    #     return api.get_exception(
+    #         HTTPStatus.BAD_REQUEST, headers, request.format,
+    #         'NoApplicableCode', msg)
+    #
+    # except ProviderGenericError as err:
+    #     return api.get_exception(
+    #         err.http_status_code, headers, request.format,
+    #         err.ogc_exception_code, err.message)
+    #
+    # except ValueError as e:
+    #     msg = str(e)
+    #     return api.get_exception(
+    #         HTTPStatus.BAD_REQUEST, headers, request.format,
+    #         'InvalidParameterValue', msg)
+    #
+    # except Exception as e:
+    #     LOGGER.error(f'Join execution failed: {e}', exc_info=True)
+    #     msg = f'Join execution failed: {str(e)}'
+    #     return api.get_exception(
+    #         HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
+    #         'NoApplicableCode', msg)
 
 
+def return_join_data(api: API, request: APIRequest, join_id: str) -> Tuple[dict, int, str]:
+    """
+    Returns the data for a specific join
 
+    :param request: A request object
+    :param join_id: The id of the join to retrieve
 
+    :returns: tuple of headers, status code, content
+    """
+    if not request.is_valid(PLUGINS['formatter'].keys()):
+        return api.get_format_exception(request)
 
-
-
-
-
-
-
-
-    if dataset not in collections.keys():
-        msg = 'Collection not found'
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', msg)
+    headers = request.get_response_headers(SYSTEM_LOCALE, **api.api_headers)
 
     try:
-        # Get the provider
-        provider_def = get_provider_by_type(
-            collections[dataset]['providers'], 'feature')
-        p = load_plugin('provider', provider_def)
+        working_dir = api.config.get('server', {}).get('workingdir', os.getcwd())
 
-        # Query all features from provider
-        LOGGER.debug(f'Fetching features from collection: {dataset}')
-        result = p.query(limit=10000)  # Adjust limit as needed
+        # Load join metadata
+        join_metadata = load_joins_metadata(working_dir).get(join_id)
 
-        if 'features' not in result:
-            msg = 'Provider did not return features'
+        if not join_metadata:
+            msg = f'Join not found: {join_id}'
             return api.get_exception(
-                HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
-                'NoApplicableCode', msg)
+                HTTPStatus.NOT_FOUND, headers, F_JSON,
+                'NotFound', msg
+            )
 
-        # Perform the join
-        from pygeoapi.util import perform_geojson_csv_join_from_stream
+        # Retrieve join result from disk
+        join_result_path = join_metadata['result']['path']
+        if not os.path.exists(join_result_path):
+            msg = f'Join result file not found: {join_result_path}'
+            return api.get_exception(
+                HTTPStatus.NOT_FOUND, headers, F_JSON,
+                'NotFound', msg
+            )
 
-        joined_geojson, statistics = perform_geojson_csv_join_from_stream(
-            geojson_data=result,
-            csv_stream=csv_stream,
-            geojson_key=geojson_key,
-            csv_key=csv_key,
-            csv_delimiter=csv_delimiter,
-            csv_encoding=csv_encoding
-        )
+        with open(join_result_path, 'r') as f:
+            join_result = json.load(f)
 
-        # Build response
-        content = {
-            'type': 'FeatureCollection',
-            'features': joined_geojson.get('features', []),
-            'statistics': statistics,
-            'numberMatched': statistics['numberMatched'],
-            'numberOfUnmatchedLeftItems': statistics['numberOfUnmatchedLeftItems'],
-            'numberOfUnmatchedRightItems': statistics['numberOfUnmatchedRightItems']
-        }
+        headers['Content-Type'] = join_metadata['result']['format']
 
-        return headers, HTTPStatus.CREATED, to_json(content, api.pretty_print)
-
-    except ProviderTypeError:
-        msg = 'Invalid provider type'
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'NoApplicableCode', msg)
-
-    except ProviderGenericError as err:
-        return api.get_exception(
-            err.http_status_code, headers, request.format,
-            err.ogc_exception_code, err.message)
-
-    except ValueError as e:
-        msg = str(e)
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'InvalidParameterValue', msg)
+        return headers, HTTPStatus.OK, to_json(join_result, api.pretty_print)
 
     except Exception as e:
-        LOGGER.error(f'Join execution failed: {e}', exc_info=True)
-        msg = f'Join execution failed: {str(e)}'
+        LOGGER.error(f'Failed to retrieve join data: {e}', exc_info=True)
+        msg = f'Failed to retrieve join data: {str(e)}'
         return api.get_exception(
-            HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
-            'NoApplicableCode', msg)
+            HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
+            'NoApplicableCode', msg
+        )
 
 
 def delete_join(api: API, request: APIRequest,

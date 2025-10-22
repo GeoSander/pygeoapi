@@ -214,6 +214,9 @@ class APIRequest:
         # Set default request data
         self._data = b''
 
+        # Form data
+        self._form = {}
+
         # Copy request query parameters
         self._args = self._get_params(request)
 
@@ -240,6 +243,13 @@ class APIRequest:
         """Factory class similar to with_data, but only for flask requests"""
         api_req = cls(request, supported_locales)
         api_req._data = request.data
+        # TODO: quick hack to retrieve multipart form data
+        if hasattr(request, 'form'):
+            for key, value in request.form.items():
+                api_req._form[key] = value
+        if hasattr(request, 'files'):
+            for key, value in request.files.items():
+                api_req._form[key] = value
         return api_req
 
     @classmethod
@@ -358,6 +368,11 @@ class APIRequest:
     def data(self) -> bytes:
         """Returns the additional data send with the Request (bytes)"""
         return self._data
+
+    @property
+    def form(self) -> dict:
+        """Returns the Request form data dict"""
+        return self._form
 
     @property
     def params(self) -> dict:

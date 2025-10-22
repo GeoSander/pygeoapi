@@ -440,18 +440,23 @@ def joins(joinId=None):
     :returns: HTTP response
     """
     if request.method == 'GET':
-        if joinId:
+        if not joinId:
             # Return a list of all available joins
             return execute_from_flask(joins_api.list_joins, request)
         else:
             # Return the details of a specific join
-            return execute_from_flask(joins_api._read_join_metadata, request, joinId)
+            return execute_from_flask(joins_api.get_join_metadata, request, joinId)
     elif request.method == 'POST':
         # Create a new join
         return execute_from_flask(joins_api.create_join, request)
     else:
         # Delete an existing join
-        return execute_from_flask(joins_api._remove_join, request, joinId)
+        return execute_from_flask(joins_api.delete_join, request, joinId)
+
+
+@BLUEPRINT.route('/joins/<joinId>/result')
+def join_result(joinId):
+    return execute_from_flask(joins_api.return_join_data, request, joinId)
 
 
 @BLUEPRINT.route('/processes')
