@@ -46,6 +46,7 @@ import pygeoapi.api.maps as maps_api
 import pygeoapi.api.processes as processes_api
 import pygeoapi.api.stac as stac_api
 import pygeoapi.api.tiles as tiles_api
+import pygeoapi.api.joins as joins_api
 from pygeoapi.openapi import load_openapi_document
 from pygeoapi.config import get_config
 from pygeoapi.util import get_mimetype, get_api_rules
@@ -401,6 +402,56 @@ def collection_map(collection_id: str, style_id: str | None = None):
     return execute_from_flask(
         maps_api.get_collection_map, request, collection_id, style_id
     )
+
+
+@BLUEPRINT.route('/collections/<path:collection_id>/keys')
+def get_collection_key_fields(collection_id):
+    """
+    OGC API - Joins: collection key fields endpoint
+
+    :param collection_id: collection identifier
+
+    :returns: HTTP response
+    """
+
+    return execute_from_flask(joins_api.get_collection_key_fields, request, collection_id)
+
+
+@BLUEPRINT.route('/collections/<path:collection_id>/keys/<keyFieldId>')
+def get_collection_key_values(collection_id, keyFieldId):
+    """
+    OGC API - Joins: collection key values endpoint
+
+    :param collection_id: collection identifier
+    :param keyFieldId: key field identifier
+
+    :returns: HTTP response
+    """
+
+    return execute_from_flask(joins_api.get_collection_key_values, request, collection_id, keyFieldId)
+
+
+@BLUEPRINT.route('/joins', methods=['GET', 'POST'])
+@BLUEPRINT.route('/joins/<joinId>', methods=['GET', 'DELETE'])
+def joins(joinId=None):
+    """
+    OGC API - Joins: get available joins and join creation endpoint
+
+    :returns: HTTP response
+    """
+    if request.method == 'GET':
+        if joinId:
+            # Return a list of all available joins
+            return execute_from_flask(joins_api.list_joins, request)
+        else:
+            # Return the details of a specific join
+            return execute_from_flask(joins_api._read_join_metadata, request, joinId)
+    elif request.method == 'POST':
+        # Create a new join
+        return execute_from_flask(joins_api.create_join, request)
+    else:
+        # Delete an existing join
+        return execute_from_flask(joins_api._remove_join, request, joinId)
 
 
 @BLUEPRINT.route('/processes')

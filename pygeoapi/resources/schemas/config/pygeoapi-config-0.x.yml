@@ -519,6 +519,27 @@ properties:
                                       id_field:
                                           type: string
                                           description: required for vector data, the field corresponding to the ID
+                                      key_fields:
+                                          type: array
+                                          description: list of available join key fields
+                                          minItems: 0
+                                          items:
+                                              type: object
+                                              properties:
+                                                  id:
+                                                      type: string
+                                                      description: identifier (name) of the key field
+                                                  # title:   TODO
+                                                  #     type: string
+                                                  #     description: optional name of a related title lookup field
+                                                  default:
+                                                      type: boolean
+                                                      description: whether the key field is the default join field
+                                                  # language:   TODO
+                                                  #     type: string
+                                                  #     description: language of the key field values
+                                              required:
+                                                  - id
                                       geometry:
                                           type: object
                                           description: the field corresponding to the geometry

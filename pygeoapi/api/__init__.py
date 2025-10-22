@@ -127,7 +127,7 @@ def all_apis() -> dict:
     """
 
     from . import (coverages, environmental_data_retrieval, itemtypes, maps,
-                   processes, tiles, stac)
+                   processes, tiles, stac, joins)
 
     return {
         'coverage': coverages,
@@ -136,7 +136,8 @@ def all_apis() -> dict:
         'map': maps,
         'process': processes,
         'tile': tiles,
-        'stac': stac
+        'stac': stac,
+        'joins': joins,
     }
 
 
@@ -820,6 +821,9 @@ def conformance(api: API, request: APIRequest) -> Tuple[dict, int, str]:
                 if provider['type'] == 'feature':
                     conformance_list.extend(
                         apis_dict['itemtypes'].CONFORMANCE_CLASSES_FEATURES)  # noqa
+                    # If there are features, we can also support joins
+                    conformance_list.extend(
+                        apis_dict['joins'].CONFORMANCE_CLASSES)
                 if provider['type'] == 'record':
                     conformance_list.extend(
                         apis_dict['itemtypes'].CONFORMANCE_CLASSES_RECORDS)
