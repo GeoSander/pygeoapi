@@ -1,0 +1,531 @@
+import re
+import io
+import json
+import logging
+import uuid
+import tempfile
+from functools import lru_cache
+from pathlib import Path
+from copy import deepcopy
+from typing import Any, Optional
+from dataclasses import dataclass
+from operator import itemgetter
+from datetime import datetime, timezone, timedelta
+
+from pygeoapi.provider.base import BaseProvider
+from pygeoapi import util
+
+# Join source file name pattern: table-{uuid}.json
+_SOURCE_FILE_PATTERN = re.compile(
+    r'^table-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$',  # noqa
+    re.IGNORECASE
+)
+
+# Stores references to join source files for quick lookup
+_REF_CACHE: dict[str, dict[str, dict[str, Any]]] = {}
+
+LOGGER = logging.getLogger(__name__)
+
+# Join configuration (set at end)
+CONFIG: 'JoinConfig'
+
+
+def _delete_source(path: Path, silent: bool = False) -> bool:
+    """
+    Removes the given file from disk.
+    If it does not exist, True is immediately returned.
+
+    :param path: file path to remove
+    :param silent: if True, no exception is raised and False is returned
+
+    :returns: bool indicating if file is removed
+    """
+
+    if not path or not path.exists():
+        LOGGER.debug(f'file {path} already removed')
+        return True
+
+    try:
+        path.unlink()
+    except Exception as e:
+        LOGGER.error(f'cannot remove {path}',
+                     exc_info=e)
+        if not silent:
+            raise
+        else:
+            return False
+
+    return True
+
+
+def _cleanup_sources():
+    """
+    Removes stale join source files, if a max age or limit was set.
+    This method has no effect if REF_CACHE is empty.
+    """
+    if not CONFIG.enabled or (CONFIG.max_days == 0 and
+                              CONFIG.max_files == 0):
+        # pygeoapi has not been configured with OGC API - Joins,
+        # or auto-cleanup is not configured
+        return
+
+    now = datetime.now(timezone.utc)
+    max_age = timedelta(days=CONFIG.max_days)
+    max_files = CONFIG.max_files
+    for collection, sources in _REF_CACHE.items():
+        # sort sources by timestamp in ascending order
+        # and output as tuple (timestamp, source_id, ref)
+        source_items = sorted(
+            [(datetime.strptime(info['timeStamp'], util.DATETIME_FORMAT),
+              source_id, info['ref'])
+             for source_id, info in dict(sources.items())],
+            key=itemgetter(0)
+        )
+
+        # pass 1: limit by max_days (if configured)
+        if max_age.days > 0:
+            for timestamp, source_id, ref in source_items:
+                if now - timestamp <= max_age:
+                    continue
+                if _delete_source(ref, True):
+                    sources.pop(source_id, None)
+
+        # pass 2: limit by max_files (if configured)
+        if max_files > 0 and max_files > len(sources):
+            for _, source_id, ref in reversed(source_items)[:max_files]:
+                if _delete_source(ref, True):
+                    sources.pop(source_id, None)
+
+    # Check for and remove empty collections
+    for collection in list(_REF_CACHE.keys()):
+        if not _REF_CACHE[collection]:
+            del _REF_CACHE[collection]
+
+
+def _make_source_path(join_id: str) -> Path:
+    """
+    Makes a join source path for storage.
+    Note that the file is not actually created.
+
+    :param join_id: ID of the join data to retrieve
+
+    returns: a `Path` instance for a JSON file
+    """
+
+    json_file = CONFIG.source_dir / f'table-{join_id}.json'
+    return json_file
+
+
+def _find_source_path(collection_name: str, join_id: str) -> Optional[Path]:
+    """
+    Returns the join source file path for a specific feature collection
+    and join ID. Returns None if the join source does not exist,
+    or OGC API - Joins was disabled.
+    """
+    if not CONFIG.enabled:
+        LOGGER.debug(f'OGC API - Joins is disabled, cannot find join source '
+                     f'{join_id} for collection {collection_name}')
+        raise Exception('OGC API - Joins is disabled')
+
+    try:
+        ref = _REF_CACHE[collection_name][join_id]['ref']
+    except KeyError:
+        LOGGER.debug(f'join source {join_id} not found for '
+                     f'collection {collection_name}', exc_info=True)
+        raise
+    return ref
+
+
+def _valid_id(join_id: str) -> bool:
+    """
+    Returns True if join_id is a valid UUID string.
+    This method can be used for input sanitization purposes.
+    """
+    try:
+        uuid.UUID(join_id)
+    except (TypeError, ValueError):
+        LOGGER.debug(f'invalid join_id: {join_id}', exc_info=True)
+        return False
+    return True
+
+
+def initialize_joins(config: dict):
+    """
+    Parses the join configuration (if any).
+    Builds the initial join source reference cache.
+    Should be called when the API initializes.
+
+    :param config: pygeoapi configuration dictionary
+    """
+    global CONFIG
+
+    CONFIG = JoinConfig.from_dict(config)
+    if not CONFIG.enabled:
+        # pygeoapi has not been configured with OGC API - Joins
+        LOGGER.info('OGC API - Joins has not been configured')
+        return
+
+    # Read all files from dir that match 'table-{uuid}.json'
+    # and build REF_CACHE
+    for file in CONFIG.source_dir.iterdir():
+        if file.is_file() and _SOURCE_FILE_PATTERN.match(file.name):
+            with open(file, 'r') as f:
+                source_dict = json.load(f)
+                source_id = source_dict['id']
+                collection_name = source_dict['collectionName']
+                collection_dict = _REF_CACHE.setdefault(collection_name, {})
+                collection_dict[source_id] = {
+                    'timeStamp': source_dict['timeStamp'],
+                    'ref': file
+                }
+
+    # remove stale sources
+    _cleanup_sources()
+
+
+def collection_keys(provider: dict,
+                    collection_name: str) -> list[dict[str, str]]:
+    """
+    Retrieves the key field configuration for the given feature provider.
+
+    :param provider: feature provider
+    :param collection_name: name of feature collection
+
+    :returns: list of key fields
+    """
+    id_field = provider['id_field']
+    key_fields = deepcopy(provider.get('key_fields', []))
+    default_key = None
+    id_field_found = False
+
+    for key in key_fields:
+        if key.get('default', False):
+            if default_key:
+                raise ValueError(f'multiple default key fields configured for '
+                                 f'feature collection \'{collection_name}\'')
+            default_key = key['id']
+        if key['id'] == id_field:
+            id_field_found = True
+
+    if not id_field_found:
+        key_fields.append({
+            'id': id_field,
+            'default': True if default_key in (None, id_field) else False,
+        })
+
+    return key_fields
+
+
+def process_csv(collection_name: str, collection_provider: BaseProvider,
+                form_data: dict) -> dict:
+    """
+    Processes the CSV form data and stores the result as a JSON file
+    in a temporary directory.
+
+    :param collection_name: collection name to apply join source to
+    :param collection_provider: feature collection provider
+    :param form_data: parameters dict (from request form data)
+
+    :returns: dictionary containing the processed join data
+    """
+
+    # Make sure again that we really have a feature provider here
+    if collection_provider.type != 'feature':
+        raise ValueError(f'join source must be linked to a feature provider '
+                         f'(got {collection_provider.type})')
+
+    # Extract required parameters (raises KeyError if missing)
+    left_dataset_key = form_data['collectionKey']
+    right_dataset_key = form_data['joinKey']
+    csv_data = form_data['joinFile']
+
+    # TODO: this is specific to Flask (FileStorage object)!
+    csv_file = csv_data.filename
+    if hasattr(csv_data, 'seek'):
+        csv_data.seek(0)
+
+    # CSV processing parameters (optional)
+    csv_delimiter = form_data.get('csvDelimiter', ',')
+    csv_header_row = int(form_data.get('csvHeaderRow', 1))
+    csv_data_start_row = int(form_data.get('csvDataStartRow', 2))
+
+    join_data = {}
+
+    LOGGER.debug('Starting GeoJSON-CSV join from stream')
+    try:
+        # Wrap binary stream in TextIOWrapper for reading
+        # TODO: support other encodings
+        text_stream = io.TextIOWrapper(csv_data, encoding='utf-8', newline='')
+
+        # Read all lines
+        lines = text_stream.readlines()
+
+        if len(lines) < csv_header_row:
+            raise ValueError(
+                f'data has fewer lines ({len(lines)}) than '
+                f'header row number (csvHeaderRow={csv_header_row})'
+            )
+
+        if csv_data_start_row > len(lines):
+            raise ValueError(
+                f'data has fewer lines ({len(lines)}) than '
+                f'start row number (csvDataStartRow={csv_data_start_row})'
+            )
+
+        # Extract header from specified row (convert to 0-based index)
+        header_line = lines[csv_header_row - 1]
+        csv_fieldnames = tuple(field.strip() for field in
+                               header_line.strip().split(csv_delimiter))
+
+        if right_dataset_key not in csv_fieldnames:
+            raise ValueError(
+                f'key field "{right_dataset_key}" not found '
+                f'in CSV fields ({csv_fieldnames})'
+            )
+
+        LOGGER.debug(f'CSV header fields {csv_fieldnames}')
+
+        # Parse fields to include and validate
+        user_fields = [f.strip() for f in
+                       form_data.get('joinFields', '').split(',')
+                       if f.strip()]
+        collection_fields = frozenset(collection_provider.get_fields())
+        if user_fields:
+            # User specified fields to include:
+            # include all fields that exist in the CSV, do not conflict
+            # with provider fields, and aren't the right dataset key
+            join_fields = [f for f in user_fields
+                           if f not in collection_fields
+                           and f in csv_fieldnames
+                           and f != right_dataset_key]
+        else:
+            # User did not specify fields to include:
+            # include all fields that do not conflict with provider fields
+            # and aren't the right dataset key
+            join_fields = [f for f in csv_fieldnames
+                           if f not in collection_fields
+                           and f != right_dataset_key]
+
+        LOGGER.debug(f'including CSV fields {join_fields}')
+
+        # Process data rows starting from specified row
+        row_count = 0
+        for line_num in range(csv_data_start_row - 1, len(lines)):
+            line = lines[line_num].strip()
+            if not line:
+                continue  # Skip empty lines
+
+            # Split row into values using specified delimiter
+            values = [v.strip() for v in line.split(csv_delimiter)]
+
+            if len(values) != len(csv_fieldnames):
+                raise ValueError(
+                    f'got {len(csv_fieldnames)} fields but '
+                    f'{len(values)} values'
+                )
+
+            # Create dict from header and values
+            row_dict = dict(zip(csv_fieldnames, values))
+
+            # Get key value
+            # NOTE: we keep this a string!
+            key_value = row_dict.get(right_dataset_key, '').strip()
+
+            if not key_value:
+                raise ValueError('found empty or missing key')
+
+            if key_value in join_data:
+                raise ValueError(f'found duplicate key ({key_value})')
+
+            # Add data row to output for key and fields of interest
+            join_data[key_value] = [row_dict[f] for f in join_fields]
+            row_count += 1
+
+        LOGGER.debug(f'Processed {row_count} CSV records')
+
+    except (UnicodeDecodeError, ValueError) as e:
+        LOGGER.error('failed to process CSV', exc_info=True)
+        raise ValueError(f'failed to process CSV: {e}')
+
+    num_keys = len(join_data)
+    LOGGER.debug(f'CSV lookup contains {num_keys} unique keys')
+
+    created = util.get_current_datetime()
+    source_id = str(uuid.uuid4())
+    output = {
+        "id": source_id,
+        "timeStamp": created,
+        "collectionName": collection_name,
+        "collectionKey": left_dataset_key,
+        "joinSource": csv_file,
+        "joinKey": right_dataset_key,
+        "joinFields": join_fields,
+        "numberOfRows": num_keys,
+        "data": join_data
+    }
+
+    # Lazily clean up stale sources
+    _cleanup_sources()
+
+    # Store the output as JSON file named 'table-{uuid}.json'
+    json_file = _make_source_path(source_id)
+    with open(json_file, 'w') as f:
+        json.dump(output, f, indent=4)
+
+    # Update REF_CACHE
+    _REF_CACHE[collection_name][source_id] = {
+        "timeStamp": created,
+        "ref": json_file
+    }
+
+    return output
+
+
+def list_sources(collection_name: str) -> dict:
+    """
+    Retrieve all available join sources for a given feature collection.
+
+    :param collection_name: name of feature collection
+
+    :returns: list of dict with source references
+    """
+    if not CONFIG.enabled:
+        LOGGER.debug(f'OGC API - Joins is disabled, cannot list sources '
+                     f'for collection {collection_name}')
+        raise Exception('OGC API - Joins is disabled')
+
+    # Note: raises KeyError if collection_name is not in _REF_CACHE
+    return _REF_CACHE[collection_name]
+
+
+@lru_cache(maxsize=8)  # cache up to 8 sources for speed
+def read_join_source(collection_name: str,
+                     join_id: str) -> dict:
+    """
+    Tries to read the join source file for a specific collection.
+    The resulting JSON dict is cached for reuse.
+
+    :param collection_name: name of feature collection
+    :param join_id: ID of the join data to retrieve
+
+    :returns: dict with join source data on success,
+              otherwise an empty dict
+    """
+    if not _valid_id(join_id):
+        raise ValueError('invalid join source ID')
+
+    ref = _find_source_path(collection_name, join_id)
+    if ref is None or not ref.exists():
+        # Unusual scenario: Path is set to empty value
+        raise KeyError(f'join source {join_id} not found for collection '
+                       f'{collection_name}')
+
+    with open(ref, 'r') as f:
+        source_dict = json.load(f)
+
+    return source_dict
+
+
+def perform_join(feature_collection: dict, collection_name: str,
+                 join_id: str):
+    """
+    On-the-fly join of a join source table to a feature collection.
+    The join will be in-place, so this method returns nothing.
+
+    :param feature_collection: feature collection to apply join to
+    :param collection_name: name of feature collection
+    :param join_id: ID of the join data source to retrieve
+
+    :raises: ValueError if the join source does not exist
+    """
+
+    source_dict = read_join_source(collection_name, join_id)
+
+    # First perform join on each GeoJSON Feature
+    join_count = 0
+    collection_key = source_dict['collectionKey']
+    join_data = source_dict['data']
+    join_fields = source_dict['joinFields']
+    for feature in feature_collection['features']:
+        # NOTE: look up key as string!
+        key = str(feature['properties'].get(collection_key, ''))
+        join_row = join_data.get(key, [])
+        for field, value in zip(join_fields, join_row):
+            feature['properties'][field] = value
+        # Add foreign member to GeoJSON Feature for join status
+        if join_row:
+            feature['joined'] = True
+            join_count += 1
+        else:
+            feature['joined'] = False
+
+    # TODO: update links if there are joins?
+    # That would contain useful info about the join source
+
+    # Now add join count as foreign member on FeatureCollection
+    feature_collection['numberJoined'] = join_count
+
+
+def remove_source(collection_name: str, join_id: str):
+    """
+    Remove the join source data for a feature collection.
+
+    :param collection_name: name of feature collection
+    :param join_id: ID of the join data source to remove
+
+    :raises: on bad parameters or deletion failure
+    """
+
+    if not _valid_id(join_id):
+        raise ValueError('invalid join source ID')
+
+    try:
+        join_ref = _REF_CACHE[collection_name].pop(join_id)
+        if not _REF_CACHE[collection_name]:
+            # No more sources for collection: delete key
+            del _REF_CACHE[collection_name]
+    except KeyError:
+        LOGGER.debug(f'join source {join_id} not found in cache for '
+                     f'collection {collection_name}')
+        raise
+
+    _delete_source(join_ref.get('ref'))
+
+
+@dataclass
+class JoinConfig:
+    """
+    Configuration object for OGC API - Joins utility.
+    """
+    source_dir: Path
+    max_days: int = 0
+    max_files: int = 0
+    enabled: bool = False
+
+    @classmethod
+    def from_dict(cls, config: dict) -> 'JoinConfig':
+        source_dir = Path(tempfile.gettempdir())
+        join_config = config.get('server', {}).get('joins')
+        if join_config is None:
+            # pygeoapi was configured without OGC API - Joins:
+            # enabled will be False
+            LOGGER.debug('no pygeoapi server.joins configuration found')
+            return cls(source_dir)
+
+        conf_source_dir = join_config.get('source_dir')
+        if conf_source_dir:
+            conf_source_dir = Path(conf_source_dir).resolve()
+            # Make sure that the directory exists (recursively)
+            # NOTE: if user configured 'temp_dir' with a file path
+            #       and the file exists, this will raise an error
+            conf_source_dir.mkdir(parents=True, exist_ok=True)
+            source_dir = conf_source_dir
+
+        return cls(source_dir,
+                   max_days=join_config.get('max_days', 0),
+                   max_files=join_config.get('max_files', 0),
+                   enabled=True)
+
+
+# Make sure JOIN_CONFIG is always initialized (default: disabled state)
+CONFIG = JoinConfig(Path(tempfile.gettempdir()))

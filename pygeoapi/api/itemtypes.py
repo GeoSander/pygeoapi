@@ -47,6 +47,7 @@ from pygeofilter.parsers.ecql import parse as parse_ecql_text
 from pygeofilter.parsers.cql2_json import parse as parse_cql2_json
 from pyproj.exceptions import CRSError
 
+import join_util
 from pygeoapi import l10n
 from pygeoapi.api import evaluate_limit
 from pygeoapi.crs import (DEFAULT_CRS, DEFAULT_STORAGE_CRS,
@@ -251,7 +252,7 @@ def get_collection_items(
     properties = []
     reserved_fieldnames = ['bbox', 'bbox-crs', 'crs', 'f', 'lang', 'limit',
                            'offset', 'resulttype', 'datetime', 'sortby',
-                           'properties', 'skipGeometry', 'q',
+                           'properties', 'skipGeometry', 'q', 'joinId',
                            'filter', 'filter-lang', 'filter-crs']
 
     collections = filter_dict_by_key_value(api.config['resources'],
@@ -365,6 +366,7 @@ def get_collection_items(
     if not request.is_valid(dataset_formatters.keys()):
         return api.get_format_exception(request)
 
+    join_id = None
     crs_transform_spec = None
     if provider_type == 'feature':
         # crs query parameter is only available for OGC API - Features
@@ -381,6 +383,10 @@ def get_collection_items(
                 HTTPStatus.BAD_REQUEST, headers, request.format,
                 'InvalidParameterValue', msg)
         set_content_crs_header(headers, provider_def, query_crs_uri)
+
+        # joinId query parameter also works for OGC API - Features only
+        LOGGER.debug('processing joinId parameter')
+        join_id = request.params.get('joinId')
 
     LOGGER.debug('Processing bbox-crs parameter')
     bbox_crs = request.params.get('bbox-crs')
@@ -550,6 +556,7 @@ def get_collection_items(
     LOGGER.debug(f'filter_: {filter_}')
     LOGGER.debug(f'filter-lang: {filter_lang}')
     LOGGER.debug(f'filter-crs: {filter_crs_uri}')
+    LOGGER.debug(f'joinId: {join_id}')
 
     try:
         content = p.query(offset=offset, limit=limit,
@@ -563,6 +570,32 @@ def get_collection_items(
         return api.get_exception(
             err.http_status_code, headers, request.format,
             err.ogc_exception_code, err.message)
+
+    if join_id:
+        # Post-process FeatureCollection and join with CSV data
+        try:
+            join_util.perform_join(content, dataset, join_id)
+        except ValueError as e:
+            LOGGER.error(f'Invalid request parameter: {e}',
+                         exc_info=True)
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', str(e))
+        except KeyError as e:
+            msg = 'Join source not found'
+            LOGGER.error(f'Unknown joinId: {e}',
+                         exc_info=True)
+            return api.get_exception(
+                HTTPStatus.NOT_FOUND, headers, request.format,
+                'NotFound', msg)
+        except Exception as e:
+            LOGGER.error(f'Failed to perform join: {e}',
+                         exc_info=True)
+            msg = f'Failed to perform join: {str(e)}'
+            return api.get_exception(
+                HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
+                'NoApplicableCode', msg
+            )
 
     serialized_query_params = ''
     for k, v in request.params.items():

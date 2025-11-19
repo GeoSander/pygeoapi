@@ -64,6 +64,7 @@ from pygeoapi.process.manager.base import get_manager
 from pygeoapi.provider.base import (
     ProviderConnectionError, ProviderGenericError, ProviderTypeError)
 
+from pygeoapi.join_util import initialize_joins
 from pygeoapi.util import (
     TEMPLATESDIR, UrlPrefetcher, dategetter,
     filter_dict_by_key_value, filter_providers_by_type, get_api_rules,
@@ -562,6 +563,9 @@ class API:
         self.api_headers = get_api_rules(self.config).response_headers
         self.base_url = get_base_url(self.config)
         self.prefetcher = UrlPrefetcher()
+
+        # Build reference cache of join tables already/still on the server
+        initialize_joins(config)
 
         CHARSET[0] = config['server'].get('encoding', 'utf-8')
         if config['server'].get('gzip'):

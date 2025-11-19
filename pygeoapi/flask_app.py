@@ -414,26 +414,28 @@ def get_collection_key_fields(collection_id):
     :returns: HTTP response
     """
 
-    return execute_from_flask(joins_api.get_collection_key_fields, request, collection_id)
+    return execute_from_flask(joins_api.key_fields, request, collection_id)
 
 
-@BLUEPRINT.route('/collections/<path:collection_id>/keys/<keyFieldId>')
-def get_collection_key_values(collection_id, keyFieldId):
-    """
-    OGC API - Joins: collection key values endpoint
+# TODO: Why is this needed?
+# @BLUEPRINT.route('/collections/<path:collection_id>/keys/<keyFieldId>')
+# def get_collection_key_values(collection_id, keyFieldId):
+#     """
+#     OGC API - Joins: collection key values endpoint
+#
+#     :param collection_id: collection identifier
+#     :param keyFieldId: key field identifier
+#
+#     :returns: HTTP response
+#     """
+#
+#     return execute_from_flask(joins_api.key_values, request, collection_id, keyFieldId)
 
-    :param collection_id: collection identifier
-    :param keyFieldId: key field identifier
 
-    :returns: HTTP response
-    """
-
-    return execute_from_flask(joins_api.get_collection_key_values, request, collection_id, keyFieldId)
-
-
-@BLUEPRINT.route('/joins', methods=['GET', 'POST'])
-@BLUEPRINT.route('/joins/<joinId>', methods=['GET', 'DELETE'])
-def joins(joinId=None):
+# TODO: add @BLUEPRINT.route('/joins', methods=['GET']) for convenience?
+@BLUEPRINT.route('/collections/<path:collection_id>/joins', methods=['GET', 'POST'])
+@BLUEPRINT.route('/collections/<path:collection_id>/joins/<joinId>', methods=['GET', 'DELETE'])
+def joins(collection_id, joinId=None):
     """
     OGC API - Joins: get available joins and join creation endpoint
 
@@ -442,21 +444,16 @@ def joins(joinId=None):
     if request.method == 'GET':
         if not joinId:
             # Return a list of all available joins
-            return execute_from_flask(joins_api.list_joins, request)
+            return execute_from_flask(joins_api.list_joins, request, collection_id)
         else:
             # Return the details of a specific join
-            return execute_from_flask(joins_api.get_join_metadata, request, joinId)
+            return execute_from_flask(joins_api.join_details, request, collection_id, joinId)
     elif request.method == 'POST':
         # Create a new join
-        return execute_from_flask(joins_api.create_join, request)
+        return execute_from_flask(joins_api.create_join, request, collection_id)
     else:
         # Delete an existing join
-        return execute_from_flask(joins_api.delete_join, request, joinId)
-
-
-@BLUEPRINT.route('/joins/<joinId>/result')
-def join_result(joinId):
-    return execute_from_flask(joins_api.return_join_data, request, joinId)
+        return execute_from_flask(joins_api.delete_join, request, collection_id, joinId)
 
 
 @BLUEPRINT.route('/processes')

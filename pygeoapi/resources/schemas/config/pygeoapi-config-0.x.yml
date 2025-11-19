@@ -161,6 +161,25 @@ properties:
                     version_header:
                         type: string
                         description: API version response header (leave empty or unset to omit this header)
+            joins:
+                type: object
+                description: option
+                properties:
+                    source_dir:
+                        type: string
+                        description: |-
+                            Directory to store joinable source files in. 
+                            Defaults to the system temp directory if not set.
+                    max_days:
+                        type: integer
+                        description: |-
+                            Maximum amount of days to keep joinable source files.
+                            If not set or 0, no automatic (lazy) cleanup will be performed.
+                    max_files:
+                        type: integer
+                        description: |-
+                            Maximum amount of joinable source files to keep per collection.
+                            If not set or 0, no automatic (lazy) cleanup will be performed.
         required:
             - bind
             - url

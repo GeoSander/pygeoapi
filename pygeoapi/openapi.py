@@ -682,6 +682,15 @@ def get_oas_30_parameters(cfg: dict, locale_: str):
                 }
             }
         },
+        'joinId': {
+            'name': 'joinId',
+            'in': 'query',
+            'description': 'The optional joinId parameter specifies the tabular data reference that must be joined to the feature collection items before being returned.',  # noqa
+            'required': False,
+            'schema': {
+                'type': 'string'
+            }
+        },
         'vendorSpecificParameters': {
             'name': 'vendorSpecificParameters',
             'in': 'query',
