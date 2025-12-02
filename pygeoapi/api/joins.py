@@ -850,7 +850,12 @@ def create_join(api: API, request: APIRequest,
     headers, collections, dataset = _prepare(api, request, dataset)
 
     if not api.supports_joins:
-        msg = f'Joins not supported by this API instance'
+        msg = 'OGC API - Joins is not available on this instance'
+        return _server_error(api, request, headers, msg)
+
+    if not request.supports_formdata:
+        # i.e. python-multipart library is not installed for Starlette
+        msg = 'multipart/form-data requests are not supported on this instance'
         return _server_error(api, request, headers, msg)
 
     if dataset not in collections:

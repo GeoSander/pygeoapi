@@ -227,6 +227,7 @@ class APIRequest:
 
         # Set multipart/form-data using from_* factory methods
         self._form = {}
+        self._supports_formdata = True
 
         # Get path info
         if hasattr(request, 'scope'):
@@ -265,7 +266,7 @@ class APIRequest:
         """
         api_req = cls(request, supported_locales)
         api_req._data = await request.body()
-        async for key, value in cls._formdata_starlette(request):
+        async for key, value in cls._formdata_starlette(api_req, request):
             LOGGER.debug(f"Setting form field '{key}'")
             if key in api_req._form:
                 LOGGER.debug(f"Skipping duplicate form field '{key}'")
@@ -309,10 +310,12 @@ class APIRequest:
                                   BytesIO(file_obj.read()))
 
     @staticmethod
-    async def _formdata_starlette(request):
+    async def _formdata_starlette(api_req: 'APIRequest', request):
         """ Normalize Starlette/FastAPI form data (async). """
 
         if python_multipart is None:
+            # Set flag so other methods know multipart/form-data is unavailable
+            api_req._supports_formdata = False
             LOGGER.debug('python_multipart is not installed: ' +
                          'skipping async multipart/form-data')
             return
@@ -436,6 +439,15 @@ class APIRequest:
     def form(self) -> dict:
         """Returns the Request form data dict (multipart/form-data)"""
         return self._form
+
+    @property
+    def supports_formdata(self) -> bool:
+        """
+        Returns True if the request supports multipart/form-data.
+        This is unavailable for Starlette/FastAPI if python-multipart
+        is not installed.
+        """
+        return self._supports_formdata
 
     @property
     def params(self) -> dict:
@@ -634,6 +646,7 @@ class API:
             # build reference cache of join tables already/still on the server
             self.supports_joins = joins_api.init(config)
         else:
+            # Set flag so other methods know OGC API - Joins is unavailable
             self.supports_joins = False
 
         CHARSET[0] = config['server'].get('encoding', 'utf-8')
@@ -906,10 +919,12 @@ def conformance(api: API, request: APIRequest) -> Tuple[dict, int, str]:
                         apis_dict[provider['type']].CONFORMANCE_CLASSES)
                 if provider['type'] == 'feature':
                     conformance_list.extend(
-                        apis_dict['itemtypes'].CONFORMANCE_CLASSES_FEATURES)  # noqa
-                    # If there are features, we can also support joins
-                    conformance_list.extend(
-                        apis_dict['joins'].CONFORMANCE_CLASSES)
+                        apis_dict['itemtypes'].CONFORMANCE_CLASSES_FEATURES)
+                    # If it's an OGC API - Features provider and joins is
+                    # supported, we can also add conformance classes for it
+                    if api.supports_joins:
+                        conformance_list.extend(
+                            apis_dict['joins'].CONFORMANCE_CLASSES)
                 if provider['type'] == 'record':
                     conformance_list.extend(
                         apis_dict['itemtypes'].CONFORMANCE_CLASSES_RECORDS)
