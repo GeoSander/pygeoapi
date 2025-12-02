@@ -35,7 +35,7 @@ from pygeoapi.api import (
     F_JSON, F_JSONLD, F_HTML, HTTPStatus
 )
 from pygeoapi.openapi import get_visible_collections
-from pygeoapi.plugin import load_plugin, PLUGINS
+from pygeoapi.plugin import load_plugin
 from pygeoapi.provider.base import ProviderTypeError
 from pygeoapi.util import (
     get_provider_by_type, to_json, filter_providers_by_type,
@@ -683,6 +683,29 @@ def _prepare(api: API, request: APIRequest,
     return headers, collections, dataset
 
 
+def _bad_request(api: API, request: APIRequest, headers: dict,
+                 msg: str) -> tuple[dict, int, str]:
+    return api.get_exception(
+        HTTPStatus.BAD_REQUEST, headers, request.format,
+        'InvalidParameterValue', msg)
+
+
+def _not_found(api: API, request: APIRequest, headers: dict,
+               msg: str) -> tuple[dict, int, str]:
+    return api.get_exception(
+        HTTPStatus.NOT_FOUND, headers, request.format,
+        'NotFound', msg
+    )
+
+
+def _server_error(api: API, request: APIRequest, headers: dict,
+                  msg: str) -> tuple[dict, int, str]:
+    return api.get_exception(
+        HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
+        'NoApplicableCode', msg
+    )
+
+
 def list_joins(api: API, request: APIRequest,
                dataset: str) -> tuple[dict, int, str]:
     """
@@ -698,25 +721,17 @@ def list_joins(api: API, request: APIRequest,
 
     if dataset not in collections:
         msg = f'Collection not found: {dataset}'
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg
-        )
+        return _not_found(api, request, headers, msg)
 
     try:
         sources = join_util.list_sources(dataset)
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
-        return api.get_exception(
-            HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
-            'NoApplicableCode', str(e)
-        )
+        return _server_error(api, request, headers, str(e))
 
     if not sources:
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound',
-            f'No joins found for collection: {dataset}'
-        )
+        return _server_error(api, request, headers,
+                             f'No joins found for collection: {dataset}')
 
     # Build the joins list with proper structure
     joins_list = []
@@ -782,10 +797,7 @@ def join_details(api: API, request: APIRequest,
 
     if dataset not in collections:
         msg = f'Collection not found: {dataset}'
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg
-        )
+        return _not_found(api, request, headers, msg)
 
     try:
         metadata = join_util.read_join_source(dataset, join_id)
@@ -806,22 +818,15 @@ def join_details(api: API, request: APIRequest,
 
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'InvalidParameterValue', str(e))
+        return _bad_request(api, request, headers, str(e))
     except KeyError as e:
         msg = 'Collection or join source not found'
         LOGGER.error(f'Invalid parameter value: {e}', exc_info=True)
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg)
+        return _not_found(api, request, headers, msg)
     except Exception as e:
         LOGGER.error(f'Failed to retrieve join: {e}', exc_info=True)
         msg = f'Failed to retrieve join: {str(e)}'
-        return api.get_exception(
-            HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
-            'NoApplicableCode', msg
-        )
+        return _server_error(api, request, headers, msg)
 
     # Set response language to requested provider locale
     # (if it supports language) and/or otherwise the requested pygeoapi
@@ -844,15 +849,13 @@ def create_join(api: API, request: APIRequest,
     """
     headers, collections, dataset = _prepare(api, request, dataset)
 
+    if not api.supports_joins:
+        msg = f'Joins not supported by this API instance'
+        return _server_error(api, request, headers, msg)
+
     if dataset not in collections:
         msg = f'Collection not found: {dataset}'
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg
-        )
-
-    if not request.is_valid(PLUGINS['formatter'].keys()):
-        return api.get_format_exception(request)
+        return _not_found(api, request, headers, msg)
 
     try:
         # Get collection provider
@@ -863,10 +866,7 @@ def create_join(api: API, request: APIRequest,
             provider = load_plugin('provider', provider_def)
         except ProviderTypeError:
             msg = f'Feature provider not found for collection: {dataset}'
-            return api.get_exception(
-                HTTPStatus.BAD_REQUEST, headers, request.format,
-                'NoApplicableCode', msg
-            )
+            return _bad_request(api, request, headers, msg)
 
         # Get provider locale (if any)
         prv_locale = l10n.get_plugin_locale(provider_def, request.raw_locale)
@@ -875,12 +875,12 @@ def create_join(api: API, request: APIRequest,
         response = {
             'links': [
                 # TODO: HTML and so on
-                # {
-                #     'href': f'{api.base_url}/joins/{details['id']}?f=json',
-                #     'rel': 'self',
-                #     'type': 'application/json',
-                #     'title': 'This document as JSON'
-                # }
+                {
+                    'href': f'{api.base_url}/joins/{details['id']}?f=json',
+                    'rel': 'self',
+                    'type': 'application/json',
+                    'title': 'This document as JSON'
+                }
             ],
             # TODO: proper response format
             'joinInfo': details
@@ -888,22 +888,15 @@ def create_join(api: API, request: APIRequest,
 
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'InvalidParameterValue', str(e))
+        return _bad_request(api, request, headers, str(e))
     except KeyError as e:
         msg = 'Collection or join source not found'
         LOGGER.error(f'Invalid parameter value: {e}', exc_info=True)
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg)
+        return _not_found(api, request, headers, msg)
     except Exception as e:
         LOGGER.error(f'Failed to retrieve join: {e}', exc_info=True)
         msg = f'Failed to retrieve join: {str(e)}'
-        return api.get_exception(
-            HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
-            'NoApplicableCode', msg
-        )
+        return _server_error(api, request, headers, msg)
 
     # Set response language to requested provider locale
     # (if it supports language) and/or otherwise the requested pygeoapi
@@ -929,29 +922,20 @@ def delete_join(api: API, request: APIRequest,
 
     if dataset not in collections:
         msg = f'Collection not found: {dataset}'
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg
-        )
+        return _not_found(api, request, headers, msg)
 
     try:
         if not join_util.remove_source(dataset, join_id):
             msg = f'Join source {join_id} not found for collection {dataset}'
-            return api.get_exception(
-                HTTPStatus.NOT_FOUND, headers, request.format,
-                'NotFound', msg)
+            return _not_found(api, request, headers, msg)
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'InvalidParameterValue', str(e))
+        return _bad_request(api, request, headers, str(e))
     except Exception as e:
         LOGGER.error(f'Failed to delete join source: {e}',
                      exc_info=True)
         msg = f'Failed to delete join: {str(e)}'
-        return api.get_exception(
-            HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
-            'NoApplicableCode', msg)
+        return _server_error(api, request, headers, msg)
 
     # Set response language to requested provider locale
     # (if it supports language) and/or otherwise the requested pygeoapi
@@ -977,16 +961,18 @@ def key_fields(api: API, request: APIRequest,
 
     if dataset not in collections:
         msg = f'Collection not found: {dataset}'
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg
-        )
+        return _not_found(api, request, headers, msg)
 
     LOGGER.debug(f"Retrieving key field configuration "
                  f"for collection '{dataset}'")
 
-    provider_def = get_provider_by_type(
-        collections[dataset]['providers'], 'feature')
+    try:
+        provider_def = get_provider_by_type(
+            collections[dataset]['providers'], 'feature')
+    except ProviderTypeError:
+        msg = f'Feature provider not found for collection: {dataset}'
+        return _bad_request(api, request, headers, msg)
+
     fields = join_util.collection_keys(provider_def, dataset)
 
     # Get provider locale (if any)

@@ -56,6 +56,13 @@ from babel import Locale
 from dateutil.parser import parse as dateparse
 import pytz
 
+try:
+    # python_multipart is needed when handling async multipart/form-data
+    import python_multipart
+except ImportError:
+    # python_multipart not available: async form data will be skipped
+    python_multipart = None
+
 from pygeoapi import __version__, l10n
 from pygeoapi.crs import DEFAULT_STORAGE_CRS, get_supported_crs_list
 from pygeoapi.linked_data import jsonldify, jsonldify_collection
@@ -218,7 +225,7 @@ class APIRequest:
         # Copy request query parameters
         self._args = self._get_params(request)
 
-        # Form data: populate in from_* factory methods
+        # Set multipart/form-data using from_* factory methods
         self._form = {}
 
         # Get path info
@@ -304,6 +311,11 @@ class APIRequest:
     @staticmethod
     async def _formdata_starlette(request):
         """ Normalize Starlette/FastAPI form data (async). """
+
+        if python_multipart is None:
+            LOGGER.debug('python_multipart is not installed: ' +
+                         'skipping async multipart/form-data')
+            return
 
         form = await request.form()
 
@@ -620,7 +632,9 @@ class API:
         if joins_api:
             # Initialize OGC API - Joins:
             # build reference cache of join tables already/still on the server
-            joins_api.init(config)
+            self.supports_joins = joins_api.init(config)
+        else:
+            self.supports_joins = False
 
         CHARSET[0] = config['server'].get('encoding', 'utf-8')
         if config['server'].get('gzip'):

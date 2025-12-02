@@ -9,6 +9,7 @@ coverage
 pyld
 
 # Testing with mock Starlette client
+python-multipart
 starlette
 uvicorn[standard]
 httpx
