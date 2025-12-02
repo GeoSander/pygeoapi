@@ -35,6 +35,8 @@ The ``server`` section provides directives on binding and high level tuning.
 
 For more information related to API design rules (the ``api_rules`` property in the example below) see :ref:`API Design Rules`.
 
+If you wish to enable and configure OGC API - Joins, see :ref:`OGC API - Joins`.
+
 .. code-block:: yaml
 
   server:
@@ -76,6 +78,12 @@ For more information related to API design rules (the ``api_rules`` property in 
     map:
         url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
         attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+
+    # optional OGC API - Joins support
+    joins:
+        source_dir: /joins  # directory containing the join source files (processed CSV's)
+        max_files: 5  # maximum number of join source files to persist (omit to disable auto-cleanup)
+        max_days: 10  # maximum number of days to keep join source files (omit to disable auto-cleanup)
 
     # optional OGC API - Processes asynchronous job management configuration
     manager:
@@ -394,6 +402,43 @@ Examples:
    curl https://example.org/collections  # resource foo is not advertised
    curl https://example.org/openapi  # resource foo is not advertised
    curl https://example.org/collections/foo  # user can access resource normally
+
+
+.. _OGC API - Joins:
+
+OGC API - Joins
+---------------
+
+To enable `OGC API - Joins <https://ogcapi.ogc.org/joins/>`_ support, all you have to do is add a `joins` key to the `server` section of your configuration file:
+
+.. code-block:: yaml
+    server:
+        joins:
+
+This is all you need to activate the OGC API - Joins endpoints for feature collections and allow you to upload CSV files,
+which will be processed and stored as join sources (`.json`) in the configured temporary directory of the server (e.g. `/tmp` on Linux or `C:\Windows\Temp` on Windows).
+
+If you wish to store the join source files in a *specific* directory, you can specify a `source_dir` parameter:
+
+.. code-block:: yaml
+    server:
+        joins:
+            source_dir: /path/to/join/sources
+
+Automatic cleanup
+^^^^^^^^^^^^^^^^^
+
+Without any further configuration, the amount of join source files could grow indefinitely.
+To control the number of files and/or days they are stored, you can set the following parameters:
+
+- `max_files`
+- `max_days`
+
+Both parameters can be set to an integer. If omitted, no cleanup rule will be set.
+Note that the settings are *not* mutually exclusive: you can also set both options.
+
+The automatic cleanup is a lazy process and does not run as a scheduled background task: the process will only run
+when a new join source file is uploaded or when pygeoapi initializes (if OGC API - Joins is enabled).
 
 
 .. _API Design Rules:
