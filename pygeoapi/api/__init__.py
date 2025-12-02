@@ -50,6 +50,7 @@ import logging
 import re
 import sys
 from typing import Any, Tuple, Union, Self
+from io import BytesIO
 
 from babel import Locale
 from dateutil.parser import parse as dateparse
@@ -64,9 +65,8 @@ from pygeoapi.process.manager.base import get_manager
 from pygeoapi.provider.base import (
     ProviderConnectionError, ProviderGenericError, ProviderTypeError)
 
-from pygeoapi.join_util import initialize_joins
 from pygeoapi.util import (
-    TEMPLATESDIR, UrlPrefetcher, dategetter,
+    TEMPLATESDIR, UrlPrefetcher, dategetter, FileObject,
     filter_dict_by_key_value, filter_providers_by_type, get_api_rules,
     get_base_url, get_provider_by_type, get_provider_default, get_typed_value,
     render_j2_template, to_json, get_choice_from_headers, get_from_headers,
@@ -215,11 +215,11 @@ class APIRequest:
         # Set default request data
         self._data = b''
 
-        # Form data
-        self._form = {}
-
         # Copy request query parameters
         self._args = self._get_params(request)
+
+        # Form data: populate in from_* factory methods
+        self._form = {}
 
         # Get path info
         if hasattr(request, 'scope'):
@@ -244,13 +244,12 @@ class APIRequest:
         """Factory class similar to with_data, but only for flask requests"""
         api_req = cls(request, supported_locales)
         api_req._data = request.data
-        # TODO: quick hack to retrieve multipart form data
-        if hasattr(request, 'form'):
-            for key, value in request.form.items():
-                api_req._form[key] = value
-        if hasattr(request, 'files'):
-            for key, value in request.files.items():
-                api_req._form[key] = value
+        for key, value in cls._formdata_flask(request):
+            LOGGER.debug(f"Setting form field '{key}'")
+            if key in api_req._form:
+                LOGGER.debug(f"Skipping duplicate form field '{key}'")
+                continue
+            api_req._form[key] = value
         return api_req
 
     @classmethod
@@ -259,6 +258,12 @@ class APIRequest:
         """
         api_req = cls(request, supported_locales)
         api_req._data = await request.body()
+        async for key, value in cls._formdata_starlette(request):
+            LOGGER.debug(f"Setting form field '{key}'")
+            if key in api_req._form:
+                LOGGER.debug(f"Skipping duplicate form field '{key}'")
+                continue
+            api_req._form[key] = value
         return api_req
 
     @classmethod
@@ -266,7 +271,52 @@ class APIRequest:
         """Factory class similar to with_data, but only for django requests"""
         api_req = cls(request, supported_locales)
         api_req._data = request.body
+        for key, value in cls._formdata_django(request):
+            LOGGER.debug(f"Setting form field '{key}'")
+            if key in api_req._form:
+                LOGGER.debug(f"Skipping duplicate form field '{key}'")
+                continue
+            api_req._form[key] = value
         return api_req
+
+    @staticmethod
+    def _formdata_flask(request):
+        """ Normalize Flask/Werkzeug form data. """
+
+        for key, value in getattr(request, 'form', {}).items():
+            yield key, value
+
+        for key, file_obj in getattr(request, 'files', {}).items():
+            yield key, FileObject(file_obj.filename, file_obj.content_type,
+                                  BytesIO(file_obj.read()))
+
+    @staticmethod
+    def _formdata_django(request):
+        """ Normalize Django form data. """
+
+        for key, value in getattr(request, 'POST', {}).items():
+            yield key, value
+
+        for key, file_obj in getattr(request, 'FILES', {}).items():
+            yield key, FileObject(file_obj.name, file_obj.content_type,
+                                  BytesIO(file_obj.read()))
+
+    @staticmethod
+    async def _formdata_starlette(request):
+        """ Normalize Starlette/FastAPI form data (async). """
+
+        form = await request.form()
+
+        for key, value in form.items():
+            if hasattr(value, 'filename'):
+                # It's a file: for Starlette, we need to read async
+                content = await value.read()
+                file_obj = FileObject(value.filename, value.content_type,
+                                      BytesIO(content))
+                yield key, file_obj
+            else:
+                # Regular form field
+                yield key, value
 
     @staticmethod
     def _get_params(request):
@@ -372,7 +422,7 @@ class APIRequest:
 
     @property
     def form(self) -> dict:
-        """Returns the Request form data dict"""
+        """Returns the Request form data dict (multipart/form-data)"""
         return self._form
 
     @property
@@ -564,8 +614,13 @@ class API:
         self.base_url = get_base_url(self.config)
         self.prefetcher = UrlPrefetcher()
 
-        # Build reference cache of join tables already/still on the server
-        initialize_joins(config)
+        setup_logger(self.config['logging'])
+
+        joins_api = all_apis().get('joins')
+        if joins_api:
+            # Initialize OGC API - Joins:
+            # build reference cache of join tables already/still on the server
+            joins_api.init(config)
 
         CHARSET[0] = config['server'].get('encoding', 'utf-8')
         if config['server'].get('gzip'):
@@ -583,8 +638,6 @@ class API:
             self.config['server']['pretty_print'] = False
 
         self.pretty_print = self.config['server']['pretty_print']
-
-        setup_logger(self.config['logging'])
 
         # Create config clone for HTML templating with modified base URL
         self.tpl_config = deepcopy(self.config)

@@ -29,18 +29,17 @@
 import logging
 from typing import Any
 
-import util
 from pygeoapi import l10n, join_util
+from pygeoapi.api import (
+    APIRequest, API, SYSTEM_LOCALE, FORMAT_TYPES,
+    F_JSON, F_JSONLD, F_HTML, HTTPStatus
+)
+from pygeoapi.openapi import get_visible_collections
 from pygeoapi.plugin import load_plugin, PLUGINS
 from pygeoapi.provider.base import ProviderTypeError
 from pygeoapi.util import (
     get_provider_by_type, to_json, filter_providers_by_type,
-    filter_dict_by_key_value
-)
-from pygeoapi.openapi import get_visible_collections
-from pygeoapi.api import (
-    APIRequest, API, SYSTEM_LOCALE, FORMAT_TYPES,
-    F_JSON, F_JSONLD, F_HTML, HTTPStatus
+    filter_dict_by_key_value, get_current_datetime
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -59,7 +58,7 @@ CONFORMANCE_CLASSES = [
     'http://www.opengis.net/spec/ogcapi-joins-1/1.0/conf/input-geojson',
     # Output
     'http://www.opengis.net/spec/ogcapi-joins-1/1.0/conf/output-geojson',
-    'http://www.opengis.net/spec/ogcapi-joins-1/1.0/conf/output-geojson-direct',
+    'http://www.opengis.net/spec/ogcapi-joins-1/1.0/conf/output-geojson-direct',  # noqa
     # Encodings
     'http://www.opengis.net/spec/ogcapi-joins-1/1.0/conf/html',
     'http://www.opengis.net/spec/ogcapi-joins-1/1.0/conf/json',
@@ -67,6 +66,17 @@ CONFORMANCE_CLASSES = [
     # OpenAPI
     'http://www.opengis.net/spec/ogcapi-joins-1/1.0/conf/oas30',
 ]
+
+
+def init(cfg: dict) -> bool:
+    """
+    Shortcut to initialize join utility with config.
+
+    :param cfg: pygeoapi configuration dict
+
+    :returns: True if the join utility was initialized successfully
+    """
+    return join_util.init(cfg)
 
 
 def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, dict]]:  # noqa
@@ -81,7 +91,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
 
     paths = {}
 
-    if not join_util.CONFIG.enabled:
+    if not join_util.init(cfg):
         LOGGER.info('OpenAPI: skipping OGC API - Joins endpoints setup')
         return [], {'paths': paths}
 
@@ -251,8 +261,8 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
         # Joins endpoints (list and create)
         paths[f'/collections/{k}/{API_NAME}'] = {
             'get': {
-                'summary': f'Get all available joins',
-                'description': f'Lists all available joins for this collection',
+                'summary': 'Get all available joins',
+                'description': 'Lists all available joins for this collection',
                 'tags': [k, API_NAME],
                 'operationId': f'get{k.capitalize()}Joins',
                 'parameters': [
@@ -289,7 +299,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                                                         },
                                                         'timeStamp': {
                                                             'type': 'string',
-                                                            'format': 'date-time',
+                                                            'format': 'date-time',  # noqa
                                                         },
                                                         'links': links_conf
                                                     }
@@ -318,7 +328,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
             },
             'post': {
                 'summary': 'Create a new join',
-                'description': 'Creates a new left (outer) join based on the collection and provided parameters',
+                'description': 'Creates a new left (outer) join based on the collection and provided parameters',  # noqa
                 'tags': [k, API_NAME],
                 'operationId': f'create{k.capitalize()}Join',
                 'parameters': [
@@ -327,7 +337,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                     #     'in': 'header',
                     #     'name': 'Prefer',
                     #     'required': False,
-                    #     'description': 'Indicates client preferences, including whether the client is capable of asynchronous processing.',
+                    #     'description': 'Indicates client preferences, including whether the client is capable of asynchronous processing.',  # noqa
                     #     'default': 'respond-async',
                     #     'schema': {
                     #         'type': 'string',
@@ -338,7 +348,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 ],
                 'requestBody': {
                     'title': 'Join Parameters',
-                    'description': 'CSV file and parameters required for the join operation.',
+                    'description': 'CSV file and parameters required for the join operation.',  # noqa
                     'required': True,
                     'content': {
                         'multipart/form-data': {
@@ -347,7 +357,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                                 'required': [
                                     # 'left-dataset-url',
                                     'collectionKey',  # 'left-dataset-key',
-                                    # 'joinFileFormat',  # 'right-dataset-format',
+                                    # 'joinFileFormat',  # 'right-dataset-format',  # noqa
                                     'joinFile',  # 'right-dataset-file',
                                     'joinKey',  # 'right-dataset-key'
                                 ],
@@ -355,48 +365,50 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                                     # 'left-dataset-url': {
                                     #     'type': 'string',
                                     #     'format': 'uri',
-                                    #     'description': 'The URL for the OGC API collection (left dataset)',
-                                    #     'example': 'http://localhost:5000/collections/my-collection'
+                                    #     'description': 'The URL for the OGC API collection (left dataset)',  # noqa
+                                    #     'example': 'http://localhost:5000/collections/my-collection'  # noqa
                                     # },
                                     'collectionKey': {
                                         'type': 'string',
-                                        'description': 'The primary key field in the left side dataset (collection) to join on'
+                                        'description': 'The primary key field in the left side dataset (collection) to join on'  # noqa
                                     },
-                                    # 'joinFileFormat': {  # TODO: is this required or is it part of joinFile?
+                                    # TODO: part of joinFile/encoding already?
+                                    # 'joinFileFormat': {
                                     #     'type': 'string',
-                                    #     'description': 'The format (i.e. MIME type) of the right side dataset file to join',
+                                    #     'description': 'The format (i.e. MIME type) of the right side dataset file to join',  # noqa
                                     #     'enum': ['text/csv'],
                                     #     'default': 'text/csv'
                                     # },
                                     'joinFile': {
                                         'type': 'string',
                                         'format': 'binary',
-                                        'description': 'The right side dataset file to upload'
+                                        'description': 'The right side dataset file to upload'  # noqa
                                     },
                                     'joinKey': {
                                         'type': 'string',
-                                        'description': 'The foreign key field in the right side dataset that contains the key values for joining'
+                                        'description': 'The foreign key field in the right side dataset that contains the key values for joining'  # noqa
                                     },
-                                    'joinFields': {  # 'right-dataset-field-list'
+                                    # 'right-dataset-field-list'
+                                    'joinFields': {
                                         'type': 'string',
-                                        'description': 'Comma-separated list of field names from the right side dataset to include in the join result. If not specified, all fields are included.',
+                                        'description': 'Comma-separated list of field names from the right side dataset to include in the join result. If not specified, all fields are included.',  # noqa
                                         'example': 'name,population,area'
                                     },
                                     'csvDelimiter': {
                                         'type': 'string',
-                                        'description': 'The delimiter character used in a CSV file (optional)',
+                                        'description': 'The delimiter character used in a CSV file (optional)',  # noqa
                                         'default': ',',
                                         'example': ','
                                     },
                                     'csvHeaderRow': {
                                         'type': 'integer',
-                                        'description': 'The 1-based row number of the header row in a CSV file (optional)',
+                                        'description': 'The 1-based row number of the header row in a CSV file (optional)',  # noqa
                                         'default': 1,
                                         'minimum': 1
                                     },
                                     'csvDataStartRow': {
                                         'type': 'integer',
-                                        'description': 'The 1-based row number where data starts in a CSV file (optional)',
+                                        'description': 'The 1-based row number where data starts in a CSV file (optional)',  # noqa
                                         'default': 2,
                                         'minimum': 1
                                     }
@@ -412,19 +424,19 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 },
                 'responses': {
                     '201': {
-                        'description': 'Started asynchronous creation of join table.',
+                        'description': 'Started asynchronous creation of join table.',  # noqa
                         'headers': {
                             'Location': {
                                 'schema': {
                                     'type': 'string',
                                 },
-                                'description': 'The URL to check the status of the join.',
+                                'description': 'The URL to check the status of the join.',  # noqa
                             },
                             'Preference-Applied': {
                                 'schema': {
                                     'type': 'string'
                                 },
-                                'description': 'The preference applied to execute the join asynchronously (see RFC 2740).'
+                                'description': 'The preference applied to execute the join asynchronously (see RFC 2740).'  # noqa
                             }
                         },
                         'content': {
@@ -481,8 +493,8 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                                 #     'properties': {
                                 #         'id': {
                                 #             'type': 'string',
-                                #             'description': 'Unique identifier for the created join',
-                                #             'example': 'leftDatasetName-rightDatasetName-1'
+                                #             'description': 'Unique identifier for the created join',  # noqa
+                                #             'example': 'leftDatasetName-rightDatasetName-1'  # noqa
                                 #         },
                                 #         'metadata': {
                                 #             'type': 'object',
@@ -495,19 +507,19 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                                 #                 'leftDataset': {
                                 #                     'type': 'object',
                                 #                     'properties': {
-                                #                         'name': {'type': 'string'},
-                                #                         'key': {'type': 'string'}
+                                #                         'name': {'type': 'string'},  # noqa
+                                #                         'key': {'type': 'string'}  # noqa
                                 #                     }
                                 #                 },
                                 #                 'rightDataset': {
                                 #                     'type': 'object',
                                 #                     'properties': {
-                                #                         'name': {'type': 'string'},
-                                #                         'key': {'type': 'string'},
-                                #                         'format': {'type': 'string'},
-                                #                         'delimiter': {'type': 'string'},
-                                #                         'headerRow': {'type': 'integer'},
-                                #                         'dataStartRow': {'type': 'integer'}
+                                #                         'name': {'type': 'string'},  # noqa
+                                #                         'key': {'type': 'string'},  # noqa
+                                #                         'format': {'type': 'string'},  # noqa
+                                #                         'delimiter': {'type': 'string'},  # noqa
+                                #                         'headerRow': {'type': 'integer'},  # noqa
+                                #                         'dataStartRow': {'type': 'integer'}  # noqa
                                 #                     }
                                 #                 },
                                 #                 'parameters': {
@@ -515,31 +527,31 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                                 #                     'properties': {
                                 #                         'includeFields': {
                                 #                             'type': 'array',
-                                #                             'items': {'type': 'string'}
+                                #                             'items': {'type': 'string'}  # noqa
                                 #                         }
                                 #                     }
                                 #                 },
                                 #                 'result': {
                                 #                     'type': 'object',
                                 #                     'properties': {
-                                #                         'path': {'type': 'string'},
-                                #                         'format': {'type': 'string'}
+                                #                         'path': {'type': 'string'},  # noqa
+                                #                         'format': {'type': 'string'}  # noqa
                                 #                     }
                                 #                 },
                                 #                 'statistics': {
                                 #                     'type': 'object',
                                 #                     'properties': {
                                 #                         'numberMatched': {
-                                #                             'type': 'integer',
-                                #                             'description': 'Number of left dataset records matched with right dataset'
+                                #                             'type': 'integer',  # noqa
+                                #                             'description': 'Number of left dataset records matched with right dataset'  # noqa
                                 #                         },
-                                #                         'numberOfUnmatchedLeftItems': {
-                                #                             'type': 'integer',
-                                #                             'description': 'Number of left dataset records without a match'
+                                #                         'numberOfUnmatchedLeftItems': {  # noqa
+                                #                             'type': 'integer',  # noqa
+                                #                             'description': 'Number of left dataset records without a match'  # noqa
                                 #                         },
-                                #                         'numberOfUnmatchedRightItems': {
-                                #                             'type': 'integer',
-                                #                             'description': 'Number of right dataset records without a match'
+                                #                         'numberOfUnmatchedRightItems': {  # noqa
+                                #                             'type': 'integer',  # noqa
+                                #                             'description': 'Number of right dataset records without a match'  # noqa
                                 #                         }
                                 #                     }
                                 #                 }
@@ -569,8 +581,8 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
         }
         paths[f'/collections/{k}/{API_NAME}/{{joinId}}'] = {
             'get': {
-                'summary': f'Get join status',
-                'description': f'Returns the status of an executed join',
+                'summary': 'Get join status',
+                'description': 'Returns the status of an executed join',
                 'tags': [k, API_NAME],
                 'operationId': f'get{k.capitalize()}JoinStatus',
                 'parameters': [
@@ -595,8 +607,8 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 '500': {'$ref': '#/components/responses/ServerError'}
             },
             'delete': {
-                'summary': f'Delete a join with the given id',
-                'description': f'Deletes a join with the given id',
+                'summary': 'Delete a join with the given id',
+                'description': 'Deletes a join with the given id',
                 'tags': [k, API_NAME],
                 'operationId': f'delete{k.capitalize()}Join',
                 'parameters': [
@@ -625,8 +637,8 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
         # Join results endpoint
         paths[f'/collections/{k}/{API_NAME}/{{joinId}}/results'] = {
             'get': {
-                'summary': f'Get results for a join with the given id',
-                'description': f'Returns the output data of an established join',
+                'summary': 'Get results for a join with the given id',
+                'description': 'Returns the output data of an established join',  # noqa
                 'tags': [k, API_NAME],
                 'operationId': f'get{k.capitalize()}JoinResult',
                 'parameters': [
@@ -664,14 +676,15 @@ def _prepare(api: API, request: APIRequest,
     :returns: tuple of headers, collections, dataset name
     """
 
-    headers = request.get_response_headers(**api.api_headers)
+    headers = request.get_response_headers(SYSTEM_LOCALE, **api.api_headers)
     collections = filter_dict_by_key_value(api.config['resources'],
                                            'type', 'collection')
     dataset = dataset.removeprefix(api.get_collections_url()).strip('/')
     return headers, collections, dataset
 
 
-def list_joins(api: API, request: APIRequest, dataset: str) -> tuple[dict, int, str]:
+def list_joins(api: API, request: APIRequest,
+               dataset: str) -> tuple[dict, int, str]:
     """
     Returns all available joins from the server
 
@@ -692,16 +705,17 @@ def list_joins(api: API, request: APIRequest, dataset: str) -> tuple[dict, int, 
 
     try:
         sources = join_util.list_sources(dataset)
-    except KeyError:
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', 'Collection not found'
-        )
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
         return api.get_exception(
             HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
             'NoApplicableCode', str(e)
+        )
+
+    if not sources:
+        return api.get_exception(
+            HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound',
+            f'No joins found for collection: {dataset}'
         )
 
     # Build the joins list with proper structure
@@ -718,7 +732,7 @@ def list_joins(api: API, request: APIRequest, dataset: str) -> tuple[dict, int, 
                     'title': f'Metadata for join source {source_id}'
                 },
                 {
-                    'href': f"{api.get_collections_url()}/{dataset}/items?joinId={source_id}",
+                    'href': f"{api.get_collections_url()}/{dataset}/items?joinId={source_id}",  # noqa
                     'rel': 'results',
                     'type': 'application/geo+json',
                     'title': f'Join {source_id} applied to {dataset}'
@@ -741,8 +755,13 @@ def list_joins(api: API, request: APIRequest, dataset: str) -> tuple[dict, int, 
         'joins': joins_list,
         'numberMatched': len(joins_list),
         'numberReturned': len(joins_list),
-        'timeStamp': util.get_current_datetime()
+        'timeStamp': get_current_datetime()
     }
+
+    # Set response language to requested provider locale
+    # (if it supports language) and/or otherwise the requested pygeoapi
+    # locale (or fallback default locale)
+    l10n.set_response_language(headers, request.locale)
 
     return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
 
@@ -785,8 +804,6 @@ def join_details(api: API, request: APIRequest,
             'joinInfo': metadata
         }
 
-        return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
-
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
         return api.get_exception(
@@ -805,6 +822,13 @@ def join_details(api: API, request: APIRequest,
             HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
             'NoApplicableCode', msg
         )
+
+    # Set response language to requested provider locale
+    # (if it supports language) and/or otherwise the requested pygeoapi
+    # locale (or fallback default locale)
+    l10n.set_response_language(headers, request.locale)
+
+    return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
 
 
 def create_join(api: API, request: APIRequest,
@@ -831,10 +855,6 @@ def create_join(api: API, request: APIRequest,
         return api.get_format_exception(request)
 
     try:
-        # Get multipart form (!) data
-        # TODO this should become more robust for other platforms (Django, Starlette)
-        params = request.form
-
         # Get collection provider
         try:
             provider_def = get_provider_by_type(
@@ -848,7 +868,10 @@ def create_join(api: API, request: APIRequest,
                 'NoApplicableCode', msg
             )
 
-        details = join_util.process_csv(dataset, provider, params)
+        # Get provider locale (if any)
+        prv_locale = l10n.get_plugin_locale(provider_def, request.raw_locale)
+
+        details = join_util.process_csv(dataset, provider, request.form)
         response = {
             'links': [
                 # TODO: HTML and so on
@@ -862,8 +885,6 @@ def create_join(api: API, request: APIRequest,
             # TODO: proper response format
             'joinInfo': details
         }
-
-        return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
 
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
@@ -883,6 +904,13 @@ def create_join(api: API, request: APIRequest,
             HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
             'NoApplicableCode', msg
         )
+
+    # Set response language to requested provider locale
+    # (if it supports language) and/or otherwise the requested pygeoapi
+    # locale (or fallback default locale)
+    l10n.set_response_language(headers, prv_locale, request.locale)
+
+    return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
 
 
 def delete_join(api: API, request: APIRequest,
@@ -907,18 +935,16 @@ def delete_join(api: API, request: APIRequest,
         )
 
     try:
-        join_util.remove_source(dataset, join_id)
+        if not join_util.remove_source(dataset, join_id):
+            msg = f'Join source {join_id} not found for collection {dataset}'
+            return api.get_exception(
+                HTTPStatus.NOT_FOUND, headers, request.format,
+                'NotFound', msg)
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
         return api.get_exception(
             HTTPStatus.BAD_REQUEST, headers, request.format,
             'InvalidParameterValue', str(e))
-    except KeyError as e:
-        msg = 'Collection or join source not found'
-        LOGGER.error(f'Invalid parameter value: {e}', exc_info=True)
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND, headers, request.format,
-            'NotFound', msg)
     except Exception as e:
         LOGGER.error(f'Failed to delete join source: {e}',
                      exc_info=True)
@@ -926,6 +952,11 @@ def delete_join(api: API, request: APIRequest,
         return api.get_exception(
             HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format,
             'NoApplicableCode', msg)
+
+    # Set response language to requested provider locale
+    # (if it supports language) and/or otherwise the requested pygeoapi
+    # locale (or fallback default locale)
+    l10n.set_response_language(headers, request.locale)
 
     # TODO: return JSON
     return headers, HTTPStatus.OK, 'Join source deleted.'
@@ -957,6 +988,9 @@ def key_fields(api: API, request: APIRequest,
     provider_def = get_provider_by_type(
         collections[dataset]['providers'], 'feature')
     fields = join_util.collection_keys(provider_def, dataset)
+
+    # Get provider locale (if any)
+    prv_locale = l10n.get_plugin_locale(provider_def, request.raw_locale)
 
     content = {
         'links': [
@@ -991,19 +1025,24 @@ def key_fields(api: API, request: APIRequest,
                     'type': FORMAT_TYPES[F_JSON],
                     'rel': request.get_linkrel(F_JSON),
                     'title': l10n.translate('The key values as JSON', request.locale),  # noqa
-                    'href': f'{api.get_collections_url()}/keys/{field_id}?f={F_JSON}'
+                    'href': f'{api.get_collections_url()}/keys/{field_id}?f={F_JSON}'  # noqa
                 }, {
                     'type': FORMAT_TYPES[F_JSONLD],
                     'rel': request.get_linkrel(F_JSONLD),
                     'title': l10n.translate('The key values as RDF (JSON-LD)', request.locale),  # noqa
-                    'href': f'{api.get_collections_url()}/keys/{field_id}?f={F_JSONLD}'
+                    'href': f'{api.get_collections_url()}/keys/{field_id}?f={F_JSONLD}'  # noqa
                 }, {
                     'type': FORMAT_TYPES[F_HTML],
                     'rel': request.get_linkrel(F_HTML),
                     'title': l10n.translate('The key values as HTML', request.locale),  # noqa
-                    'href': f'{api.get_collections_url()}/keys/{field_id}?f={F_HTML}'
+                    'href': f'{api.get_collections_url()}/keys/{field_id}?f={F_HTML}'  # noqa
                 }
             ]
         })
+
+    # Set response language to requested provider locale
+    # (if it supports language) and/or otherwise the requested pygeoapi
+    # locale (or fallback default locale)
+    l10n.set_response_language(headers, prv_locale, request.locale)
 
     return headers, HTTPStatus.OK, to_json(content, api.pretty_print)

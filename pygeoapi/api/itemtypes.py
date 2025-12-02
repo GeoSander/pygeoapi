@@ -47,8 +47,7 @@ from pygeofilter.parsers.ecql import parse as parse_ecql_text
 from pygeofilter.parsers.cql2_json import parse as parse_cql2_json
 from pyproj.exceptions import CRSError
 
-import join_util
-from pygeoapi import l10n
+from pygeoapi import l10n, join_util
 from pygeoapi.api import evaluate_limit
 from pygeoapi.crs import (DEFAULT_CRS, DEFAULT_STORAGE_CRS,
                           create_crs_transform_spec, get_supported_crs_list,
@@ -180,7 +179,7 @@ def get_collection_queryables(api: API, request: Union[APIRequest, Any],
         try:
             domains, _ = p.get_domains(properties)
         except NotImplementedError:
-            LOGGER.debug('Domains are not suported by this provider')
+            LOGGER.debug('Domains are not supported by this provider')
             domains = {}
 
     for k, v in p.fields.items():

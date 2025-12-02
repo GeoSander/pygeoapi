@@ -429,12 +429,13 @@ def get_collection_key_fields(collection_id):
 #     :returns: HTTP response
 #     """
 #
-#     return execute_from_flask(joins_api.key_values, request, collection_id, keyFieldId)
+#     return execute_from_flask(joins_api.key_values, request, collection_id,
+#     keyFieldId)
 
 
 # TODO: add @BLUEPRINT.route('/joins', methods=['GET']) for convenience?
-@BLUEPRINT.route('/collections/<path:collection_id>/joins', methods=['GET', 'POST'])
-@BLUEPRINT.route('/collections/<path:collection_id>/joins/<joinId>', methods=['GET', 'DELETE'])
+@BLUEPRINT.route('/collections/<path:collection_id>/joins', methods=['GET', 'POST'])  # noqa
+@BLUEPRINT.route('/collections/<path:collection_id>/joins/<joinId>', methods=['GET', 'DELETE'])  # noqa
 def joins(collection_id, joinId=None):
     """
     OGC API - Joins: get available joins and join creation endpoint
@@ -444,16 +445,20 @@ def joins(collection_id, joinId=None):
     if request.method == 'GET':
         if not joinId:
             # Return a list of all available joins
-            return execute_from_flask(joins_api.list_joins, request, collection_id)
+            return execute_from_flask(joins_api.list_joins, request,
+                                      collection_id)
         else:
             # Return the details of a specific join
-            return execute_from_flask(joins_api.join_details, request, collection_id, joinId)
+            return execute_from_flask(joins_api.join_details, request,
+                                      collection_id, joinId)
     elif request.method == 'POST':
         # Create a new join
-        return execute_from_flask(joins_api.create_join, request, collection_id)
+        return execute_from_flask(joins_api.create_join, request,
+                                  collection_id)
     else:
         # Delete an existing join
-        return execute_from_flask(joins_api.delete_join, request, collection_id, joinId)
+        return execute_from_flask(joins_api.delete_join, request,
+                                  collection_id, joinId)
 
 
 @BLUEPRINT.route('/processes')

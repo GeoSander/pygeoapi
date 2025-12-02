@@ -1,19 +1,19 @@
-import re
-import io
 import json
 import logging
-import uuid
+import re
 import tempfile
-from functools import lru_cache
-from pathlib import Path
+import uuid
 from copy import deepcopy
-from typing import Any, Optional
 from dataclasses import dataclass
-from operator import itemgetter
 from datetime import datetime, timezone, timedelta
+from functools import lru_cache
+from io import TextIOWrapper
+from operator import itemgetter
+from pathlib import Path
+from typing import Any
 
-from pygeoapi.provider.base import BaseProvider
 from pygeoapi import util
+from pygeoapi.provider.base import BaseProvider
 
 # Join source file name pattern: table-{uuid}.json
 _SOURCE_FILE_PATTERN = re.compile(
@@ -27,7 +27,7 @@ _REF_CACHE: dict[str, dict[str, dict[str, Any]]] = {}
 LOGGER = logging.getLogger(__name__)
 
 # Join configuration (set at end)
-CONFIG: 'JoinConfig'
+_CONFIG: 'JoinConfig'
 
 
 def _delete_source(path: Path, silent: bool = False) -> bool:
@@ -63,15 +63,15 @@ def _cleanup_sources():
     Removes stale join source files, if a max age or limit was set.
     This method has no effect if REF_CACHE is empty.
     """
-    if not CONFIG.enabled or (CONFIG.max_days == 0 and
-                              CONFIG.max_files == 0):
+    if not _CONFIG.enabled or (_CONFIG.max_days == 0 and
+                               _CONFIG.max_files == 0):
         # pygeoapi has not been configured with OGC API - Joins,
         # or auto-cleanup is not configured
         return
 
     now = datetime.now(timezone.utc)
-    max_age = timedelta(days=CONFIG.max_days)
-    max_files = CONFIG.max_files
+    max_age = timedelta(days=_CONFIG.max_days)
+    max_files = _CONFIG.max_files
     for collection, sources in _REF_CACHE.items():
         # sort sources by timestamp in ascending order
         # and output as tuple (timestamp, source_id, ref)
@@ -96,8 +96,14 @@ def _cleanup_sources():
                 if _delete_source(ref, True):
                     sources.pop(source_id, None)
 
-    # Check for and remove empty collections
+    # Check for and remove empty collections or join sources
     for collection in list(_REF_CACHE.keys()):
+        # Remove empty/non-existent references
+        for source_id in list(_REF_CACHE[collection].keys()):
+            source_ref = _REF_CACHE[collection][source_id].get('ref')
+            if not isinstance(source_ref, Path) or not source_ref.is_file():
+                del _REF_CACHE[collection][source_id]
+        # Remove empty collection
         if not _REF_CACHE[collection]:
             del _REF_CACHE[collection]
 
@@ -112,17 +118,16 @@ def _make_source_path(join_id: str) -> Path:
     returns: a `Path` instance for a JSON file
     """
 
-    json_file = CONFIG.source_dir / f'table-{join_id}.json'
+    json_file = _CONFIG.source_dir / f'table-{join_id}.json'
     return json_file
 
 
-def _find_source_path(collection_name: str, join_id: str) -> Optional[Path]:
+def _find_source_path(collection_name: str, join_id: str) -> Path:
     """
     Returns the join source file path for a specific feature collection
-    and join ID. Returns None if the join source does not exist,
-    or OGC API - Joins was disabled.
+    and join ID. Raises KeyError if the reference wasn't found.
     """
-    if not CONFIG.enabled:
+    if not _CONFIG.enabled:
         LOGGER.debug(f'OGC API - Joins is disabled, cannot find join source '
                      f'{join_id} for collection {collection_name}')
         raise Exception('OGC API - Joins is disabled')
@@ -149,25 +154,27 @@ def _valid_id(join_id: str) -> bool:
     return True
 
 
-def initialize_joins(config: dict):
+def init(config: dict) -> bool:
     """
     Parses the join configuration (if any).
     Builds the initial join source reference cache.
     Should be called when the API initializes.
 
     :param config: pygeoapi configuration dictionary
-    """
-    global CONFIG
 
-    CONFIG = JoinConfig.from_dict(config)
-    if not CONFIG.enabled:
+    :returns: True if OGC API - Joins was configured, False otherwise
+    """
+    global _CONFIG
+
+    _CONFIG = JoinConfig.from_dict(config)
+    if not _CONFIG.enabled:
         # pygeoapi has not been configured with OGC API - Joins
         LOGGER.info('OGC API - Joins has not been configured')
-        return
+        return False
 
     # Read all files from dir that match 'table-{uuid}.json'
     # and build REF_CACHE
-    for file in CONFIG.source_dir.iterdir():
+    for file in _CONFIG.source_dir.iterdir():
         if file.is_file() and _SOURCE_FILE_PATTERN.match(file.name):
             with open(file, 'r') as f:
                 source_dict = json.load(f)
@@ -181,6 +188,9 @@ def initialize_joins(config: dict):
 
     # remove stale sources
     _cleanup_sources()
+
+    LOGGER.info('OGC API - Joins was configured')
+    return True
 
 
 def collection_keys(provider: dict,
@@ -239,10 +249,17 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
     right_dataset_key = form_data['joinKey']
     csv_data = form_data['joinFile']
 
-    # TODO: this is specific to Flask (FileStorage object)!
-    csv_file = csv_data.filename
-    if hasattr(csv_data, 'seek'):
-        csv_data.seek(0)
+    if not isinstance(csv_data, util.FileObject):
+        raise ValueError(f'join source data must be a '
+                         f'{util.FileObject.__class__.__name__}, '
+                         f'got {type(csv_data)}')
+
+    if csv_data.content_type not in ('text/csv', 'application/csv'):
+        raise ValueError(f'join source data must be of type "text/csv", '
+                         f'got "{csv_data.content_type}"')
+
+    # Make sure the file pointer is at the beginning
+    csv_data.buffer.seek(0)
 
     # CSV processing parameters (optional)
     csv_delimiter = form_data.get('csvDelimiter', ',')
@@ -255,7 +272,8 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
     try:
         # Wrap binary stream in TextIOWrapper for reading
         # TODO: support other encodings
-        text_stream = io.TextIOWrapper(csv_data, encoding='utf-8', newline='')
+        text_stream = TextIOWrapper(csv_data.buffer,
+                                    encoding='utf-8', newline='')
 
         # Read all lines
         lines = text_stream.readlines()
@@ -357,7 +375,7 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
         "timeStamp": created,
         "collectionName": collection_name,
         "collectionKey": left_dataset_key,
-        "joinSource": csv_file,
+        "joinSource": csv_data.name,
         "joinKey": right_dataset_key,
         "joinFields": join_fields,
         "numberOfRows": num_keys,
@@ -389,13 +407,12 @@ def list_sources(collection_name: str) -> dict:
 
     :returns: list of dict with source references
     """
-    if not CONFIG.enabled:
+    if not _CONFIG.enabled:
         LOGGER.debug(f'OGC API - Joins is disabled, cannot list sources '
                      f'for collection {collection_name}')
         raise Exception('OGC API - Joins is disabled')
 
-    # Note: raises KeyError if collection_name is not in _REF_CACHE
-    return _REF_CACHE[collection_name]
+    return _REF_CACHE.get(collection_name, {})
 
 
 @lru_cache(maxsize=8)  # cache up to 8 sources for speed
@@ -414,11 +431,17 @@ def read_join_source(collection_name: str,
     if not _valid_id(join_id):
         raise ValueError('invalid join source ID')
 
-    ref = _find_source_path(collection_name, join_id)
-    if ref is None or not ref.exists():
-        # Unusual scenario: Path is set to empty value
-        raise KeyError(f'join source {join_id} not found for collection '
-                       f'{collection_name}')
+    try:
+        ref = _find_source_path(collection_name, join_id)
+    except KeyError:
+        # If the join source was not found, we should answer with a 404
+        return {}
+
+    if not isinstance(ref, Path) or not ref.is_file():
+        # Unusual scenario: Path is set to empty or non-existing value
+        LOGGER.debug(f'empty or non-existing join source: {join_id}')
+        _cleanup_sources()
+        return {}
 
     with open(ref, 'r') as f:
         source_dict = json.load(f)
@@ -466,30 +489,29 @@ def perform_join(feature_collection: dict, collection_name: str,
     feature_collection['numberJoined'] = join_count
 
 
-def remove_source(collection_name: str, join_id: str):
+def remove_source(collection_name: str, join_id: str) -> bool:
     """
     Remove the join source data for a feature collection.
 
     :param collection_name: name of feature collection
     :param join_id: ID of the join data source to remove
 
-    :raises: on bad parameters or deletion failure
+    :returns: True on success, False otherwise
     """
 
     if not _valid_id(join_id):
         raise ValueError('invalid join source ID')
 
-    try:
-        join_ref = _REF_CACHE[collection_name].pop(join_id)
-        if not _REF_CACHE[collection_name]:
-            # No more sources for collection: delete key
-            del _REF_CACHE[collection_name]
-    except KeyError:
-        LOGGER.debug(f'join source {join_id} not found in cache for '
-                     f'collection {collection_name}')
-        raise
+    collection = _REF_CACHE.get(collection_name, {})
+    join_ref = collection.pop(join_id, None)
+    if not collection:
+        # No more sources for collection: delete key
+        del _REF_CACHE[collection_name]
+    if not join_ref:
+        # If the join was not found, we should answer with a 404
+        return False
 
-    _delete_source(join_ref.get('ref'))
+    return _delete_source(join_ref.get('ref'))
 
 
 @dataclass
@@ -528,4 +550,4 @@ class JoinConfig:
 
 
 # Make sure JOIN_CONFIG is always initialized (default: disabled state)
-CONFIG = JoinConfig(Path(tempfile.gettempdir()))
+_CONFIG = JoinConfig(Path(tempfile.gettempdir()))

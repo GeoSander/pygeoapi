@@ -43,7 +43,7 @@ import os
 import pathlib
 from pathlib import Path
 import re
-from typing import Any, IO, Union, List, Optional
+from typing import Any, IO, Union, List, Optional, BinaryIO
 from urllib.parse import urlparse
 from urllib.request import urlopen
 import uuid
@@ -621,6 +621,17 @@ class Subscriber:
     success_uri: str
     in_progress_uri: Optional[str]
     failed_uri: Optional[str]
+
+
+@dataclass(frozen=True)
+class FileObject:
+    """
+    Simple normalized object to store (uploaded) file data in.
+    """
+
+    name: str
+    content_type: str
+    buffer: BinaryIO
 
 
 def read_data(path: Union[Path, str]) -> Union[bytes, str]:
