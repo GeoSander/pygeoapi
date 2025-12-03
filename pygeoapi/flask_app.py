@@ -417,23 +417,6 @@ def get_collection_key_fields(collection_id):
     return execute_from_flask(joins_api.key_fields, request, collection_id)
 
 
-# TODO: Why is this needed?
-# @BLUEPRINT.route('/collections/<path:collection_id>/keys/<keyFieldId>')
-# def get_collection_key_values(collection_id, keyFieldId):
-#     """
-#     OGC API - Joins: collection key values endpoint
-#
-#     :param collection_id: collection identifier
-#     :param keyFieldId: key field identifier
-#
-#     :returns: HTTP response
-#     """
-#
-#     return execute_from_flask(joins_api.key_values, request, collection_id,
-#     keyFieldId)
-
-
-# TODO: add @BLUEPRINT.route('/joins', methods=['GET']) for convenience?
 @BLUEPRINT.route('/collections/<path:collection_id>/joins', methods=['GET', 'POST'])  # noqa
 @BLUEPRINT.route('/collections/<path:collection_id>/joins/<joinId>', methods=['GET', 'DELETE'])  # noqa
 def joins(collection_id, joinId=None):

@@ -194,74 +194,10 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
             }
         }
 
-        # Key value endpoint
-        # See https://github.com/opengeospatial/ogcapi-joins/blob/master/sources/core/openapi/schemas/collectionKeyField.yaml  # noqa
-        key_field_param = {
-            'name': 'keyFieldId',
-            'in': 'path',
-            'description': 'identifier of a key field',
-            'required': True,
-            'schema': {
-                'type': 'string'
-            }
-        }
-        description = f'Return all available {title} join key values'
-        paths[f'/collections/{k}/keys/{{keyFieldId}}'] = {
-            'get': {
-                'summary': f'Get {title} values for a given join key field id',
-                'description': description,
-                'tags': [k, API_NAME],
-                'operationId': f'get{k.capitalize()}KeyValues',
-                'parameters': [
-                    key_field_param,
-                    {'$ref': '#/components/parameters/f'},
-                    # {'$ref': '#/components/parameters/lang'},
-                ],
-                'responses': {
-                    '200': {
-                        'description': 'Response',
-                        'content': {
-                            'application/json': {
-                                'schema': {
-                                    'type': 'object',
-                                    'required': [
-                                        'keyField',
-                                        'values',
-                                        'links'
-                                    ],
-                                    'properties': {
-                                        'links': links_conf,
-                                        'keyField': {
-                                            'type': 'string'
-                                        },
-                                        'values': {
-                                            'type': 'array',
-                                            'items': {
-                                                'oneOf': [
-                                                    {'type': 'integer'},
-                                                    {'type': 'string'}
-                                                ]
-                                            }
-                                        },
-                                        'numberMatched': {
-                                            'type': 'integer'
-                                        },
-                                        'numberReturned': {
-                                            'type': 'integer'
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-            }
-        }
-
         # Joins endpoints (list and create)
         paths[f'/collections/{k}/{API_NAME}'] = {
             'get': {
-                'summary': 'Get all available joins',
+                'summary': 'Get all available join sources',
                 'description': 'Lists all available joins for this collection',
                 'tags': [k, API_NAME],
                 'operationId': f'get{k.capitalize()}Joins',
@@ -581,10 +517,10 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
         }
         paths[f'/collections/{k}/{API_NAME}/{{joinId}}'] = {
             'get': {
-                'summary': 'Get join status',
-                'description': 'Returns the status of an executed join',
+                'summary': 'Get join source details',
+                'description': 'Returns the metadata for an uploaded CSV',
                 'tags': [k, API_NAME],
-                'operationId': f'get{k.capitalize()}JoinStatus',
+                'operationId': f'get{k.capitalize()}JoinSourceDetails',
                 'parameters': [
                     join_id_param,
                     {'$ref': '#/components/parameters/f'},
@@ -607,10 +543,10 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 '500': {'$ref': '#/components/responses/ServerError'}
             },
             'delete': {
-                'summary': 'Delete a join with the given id',
-                'description': 'Deletes a join with the given id',
+                'summary': 'Delete a join source with the given id',
+                'description': 'Deletes a join source with the given id',
                 'tags': [k, API_NAME],
-                'operationId': f'delete{k.capitalize()}Join',
+                'operationId': f'delete{k.capitalize()}JoinSource',
                 'parameters': [
                     join_id_param,
                     {'$ref': '#/components/parameters/f'},
@@ -634,32 +570,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
             }
         }
 
-        # Join results endpoint
-        paths[f'/collections/{k}/{API_NAME}/{{joinId}}/results'] = {
-            'get': {
-                'summary': 'Get results for a join with the given id',
-                'description': 'Returns the output data of an established join',  # noqa
-                'tags': [k, API_NAME],
-                'operationId': f'get{k.capitalize()}JoinResult',
-                'parameters': [
-                    join_id_param,
-                    {'$ref': '#/components/parameters/f'},
-                    # {'$ref': '#/components/parameters/lang'},
-                ],
-                'responses': {
-                    '200': {
-                        'description': 'Response',
-                        'content': {
-                            'application/json': {
-                                'schema': {
-                                    'type': 'object'
-                                }
-                            }  # TODO: paginated response
-                        }
-                    }
-                }
-            }
-        }
+        # TODO: inject joinId parameter for OGC API - Features /items?
 
     return [{'name': API_NAME}], {'paths': paths}
 
@@ -730,8 +641,8 @@ def list_joins(api: API, request: APIRequest,
         return _server_error(api, request, headers, str(e))
 
     if not sources:
-        return _server_error(api, request, headers,
-                             f'No joins found for collection: {dataset}')
+        return _not_found(api, request, headers,
+                          f'No joins found for collection: {dataset}')
 
     # Build the joins list with proper structure
     joins_list = []
@@ -850,11 +761,13 @@ def create_join(api: API, request: APIRequest,
     headers, collections, dataset = _prepare(api, request, dataset)
 
     if not api.supports_joins:
+        # TODO: perhaps a 406 Not Acceptable would be better?
         msg = 'OGC API - Joins is not available on this instance'
         return _server_error(api, request, headers, msg)
 
     if not request.supports_formdata:
         # i.e. python-multipart library is not installed for Starlette
+        # TODO: perhaps a 406 Not Acceptable would be better?
         msg = 'multipart/form-data requests are not supported on this instance'
         return _server_error(api, request, headers, msg)
 

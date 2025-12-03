@@ -1,3 +1,32 @@
+# =================================================================
+# Authors: Sander Schaminee <sander.schaminee@geocat.net>
+#
+# Copyright (c) 2025 Sander Schaminee
+#
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation
+# files (the "Software"), to deal in the Software without
+# restriction, including without limitation the rights to use,
+# copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following
+# conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+# OTHER DEALINGS IN THE SOFTWARE.
+#
+# =================================================================
+
+import csv
 import json
 import logging
 import re
@@ -76,9 +105,9 @@ def _cleanup_sources():
         # sort sources by timestamp in ascending order
         # and output as tuple (timestamp, source_id, ref)
         source_items = sorted(
-            [(datetime.strptime(info['timeStamp'], util.DATETIME_FORMAT),
+            [(datetime.strptime(info['timeStamp'], util.DATETIME_FORMAT).replace(tzinfo=timezone.utc),  # noqa
               source_id, info['ref'])
-             for source_id, info in dict(sources.items())],
+             for source_id, info in sources.items()],
             key=itemgetter(0)
         )
 
@@ -91,8 +120,8 @@ def _cleanup_sources():
                     sources.pop(source_id, None)
 
         # pass 2: limit by max_files (if configured)
-        if max_files > 0 and max_files > len(sources):
-            for _, source_id, ref in reversed(source_items)[:max_files]:
+        if 0 < max_files < len(sources):
+            for _, source_id, ref in list(reversed(source_items))[:max_files]:
                 if _delete_source(ref, True):
                     sources.pop(source_id, None)
 
@@ -141,7 +170,7 @@ def _find_source_path(collection_name: str, join_id: str) -> Path:
     return ref
 
 
-def _valid_id(join_id: str) -> bool:
+def _valid_id(join_id: Any) -> bool:
     """
     Returns True if join_id is a valid UUID string.
     This method can be used for input sanitization purposes.
@@ -258,7 +287,7 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
         raise ValueError(f'join source data must be of type "text/csv", '
                          f'got "{csv_data.content_type}"')
 
-    # Make sure the file pointer is at the beginning
+    # Make sure the buffer pointer is at the beginning
     csv_data.buffer.seek(0)
 
     # CSV processing parameters (optional)
@@ -266,42 +295,55 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
     csv_header_row = int(form_data.get('csvHeaderRow', 1))
     csv_data_start_row = int(form_data.get('csvDataStartRow', 2))
 
+    # Basic CSV parameter validation
+    if len(csv_delimiter) != 1:
+        raise ValueError('csvDelimiter must be a single character')
+
+    if csv_header_row < 1:
+        raise ValueError('csvHeaderRow must be at least 1')
+
+    if csv_data_start_row <= csv_header_row:
+        raise ValueError(
+            f'csvDataStartRow ({csv_data_start_row}) must be greater than '
+            f'csvHeaderRow ({csv_header_row})'
+        )
+
     join_data = {}
 
-    LOGGER.debug('Starting GeoJSON-CSV join from stream')
+    LOGGER.debug('Reading CSV data from stream')
     try:
         # Wrap binary stream in TextIOWrapper for reading
         # TODO: support other encodings
-        text_stream = TextIOWrapper(csv_data.buffer,
-                                    encoding='utf-8', newline='')
+        text_stream = TextIOWrapper(csv_data.buffer, encoding='utf-8')
+        all_lines = text_stream.readlines()
+        num_lines = len(all_lines)
 
-        # Read all lines
-        lines = text_stream.readlines()
+        LOGGER.debug(f'CSV file contains {num_lines} lines')
 
-        if len(lines) < csv_header_row:
+        if csv_header_row > num_lines:
             raise ValueError(
-                f'data has fewer lines ({len(lines)}) than '
-                f'header row number (csvHeaderRow={csv_header_row})'
+                f'csvHeaderRow ({csv_header_row}) exceeds '
+                f'number of CSV rows ({num_lines})'
             )
 
-        if csv_data_start_row > len(lines):
+        if csv_data_start_row > num_lines:
             raise ValueError(
-                f'data has fewer lines ({len(lines)}) than '
-                f'start row number (csvDataStartRow={csv_data_start_row})'
+                f'csvDataStartRow ({csv_data_start_row}) exceeds '
+                f'number of CSV rows ({num_lines})'
             )
 
-        # Extract header from specified row (convert to 0-based index)
-        header_line = lines[csv_header_row - 1]
-        csv_fieldnames = tuple(field.strip() for field in
-                               header_line.strip().split(csv_delimiter))
+        # Now read lines again to process CSV:
+        # start reading from header row
+        reader = csv.DictReader(all_lines[csv_header_row-1:],
+                                delimiter=csv_delimiter)
 
-        if right_dataset_key not in csv_fieldnames:
+        LOGGER.debug(f'CSV header fields {reader.fieldnames}')
+
+        if right_dataset_key not in reader.fieldnames:
             raise ValueError(
                 f'key field "{right_dataset_key}" not found '
-                f'in CSV fields ({csv_fieldnames})'
+                f'in CSV fields: {reader.fieldnames}'
             )
-
-        LOGGER.debug(f'CSV header fields {csv_fieldnames}')
 
         # Parse fields to include and validate
         user_fields = [f.strip() for f in
@@ -314,45 +356,40 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
             # with provider fields, and aren't the right dataset key
             join_fields = [f for f in user_fields
                            if f not in collection_fields
-                           and f in csv_fieldnames
+                           and f in reader.fieldnames
                            and f != right_dataset_key]
         else:
             # User did not specify fields to include:
             # include all fields that do not conflict with provider fields
             # and aren't the right dataset key
-            join_fields = [f for f in csv_fieldnames
+            join_fields = [f for f in reader.fieldnames
                            if f not in collection_fields
                            and f != right_dataset_key]
 
-        LOGGER.debug(f'including CSV fields {join_fields}')
+        # Skip rows between header and data start (if any)
+        rows_to_skip = csv_data_start_row - csv_header_row - 1
+        for _ in range(rows_to_skip):
+            next(reader)  # should not raise as we already validated row nums
 
-        # Process data rows starting from specified row
+        LOGGER.debug(f'collecting data from CSV fields: {join_fields}')
+
+        # Process data rows now
         row_count = 0
-        for line_num in range(csv_data_start_row - 1, len(lines)):
-            line = lines[line_num].strip()
-            if not line:
-                continue  # Skip empty lines
-
-            # Split row into values using specified delimiter
-            values = [v.strip() for v in line.split(csv_delimiter)]
-
-            if len(values) != len(csv_fieldnames):
-                raise ValueError(
-                    f'got {len(csv_fieldnames)} fields but '
-                    f'{len(values)} values'
-                )
-
-            # Create dict from header and values
-            row_dict = dict(zip(csv_fieldnames, values))
+        for row_dict in reader:
+            # Skip empty rows
+            if not any(v.strip() for v in row_dict.values() if v):
+                continue
 
             # Get key value
             # NOTE: we keep this a string!
             key_value = row_dict.get(right_dataset_key, '').strip()
 
             if not key_value:
+                # Don't be smart: user needs to fix this
                 raise ValueError('found empty or missing key')
 
             if key_value in join_data:
+                # Don't be smart: user needs to fix this too
                 raise ValueError(f'found duplicate key ({key_value})')
 
             # Add data row to output for key and fields of interest
@@ -387,11 +424,11 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
 
     # Store the output as JSON file named 'table-{uuid}.json'
     json_file = _make_source_path(source_id)
-    with open(json_file, 'w') as f:
+    with open(json_file, 'w', encoding='utf-8') as f:
         json.dump(output, f, indent=4)
 
-    # Update REF_CACHE
-    _REF_CACHE[collection_name][source_id] = {
+    # Update REF_CACHE (adding collection if not present)
+    _REF_CACHE.setdefault(collection_name, {})[source_id] = {
         "timeStamp": created,
         "ref": json_file
     }
@@ -527,12 +564,18 @@ class JoinConfig:
     @classmethod
     def from_dict(cls, config: dict) -> 'JoinConfig':
         source_dir = Path(tempfile.gettempdir())
-        join_config = config.get('server', {}).get('joins')
-        if join_config is None:
+        try:
+            join_config = config.get('server', {})['joins']
+        except KeyError:
             # pygeoapi was configured without OGC API - Joins:
             # enabled will be False
             LOGGER.debug('no pygeoapi server.joins configuration found')
             return cls(source_dir)
+
+        # Check if 'joins' key was set, but without configuration
+        if join_config is None:
+            LOGGER.debug('pygeoapi server.joins configured with defaults')
+            join_config = {}
 
         conf_source_dir = join_config.get('source_dir')
         if conf_source_dir:
