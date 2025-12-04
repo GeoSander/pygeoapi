@@ -166,6 +166,7 @@ def mock_provider():
         }
 
     provider.get_fields = mock_get_fields
+    provider.key_fields = provider.get.return_value['key_fields']
     return provider
 
 
@@ -241,6 +242,15 @@ def test_join_config_creates_directory(tmp_path):
     assert non_existent.exists()
 
 
+# Test enabled
+def test_enabled(config_minimal, config, config_disabled):
+    """Test enabled function with joins configured."""
+    assert join_util.enabled(config_minimal) is True
+    assert join_util.enabled(config) is True
+    assert join_util.enabled(config_disabled) is False
+    assert join_util.enabled({}) is False
+
+
 # Test initialization
 def test_init_disabled(config_disabled):
     """Test init with joins disabled."""
@@ -255,7 +265,7 @@ def test_init_enabled_empty_dir(config):
     assert len(join_util._REF_CACHE) == 0
 
 
-# This test has to be run here, else there will be files
+# This test has to be run here, else there will already be files
 def test_list_sources_empty(config):
     """Test list_sources with no sources."""
     join_util.init(config)
@@ -496,7 +506,7 @@ def test_process_csv_specific_fields(config, mock_provider, valid_csv_content):
 
 
 def test_process_csv_empty_key(config, mock_provider, csv_empty_keys):
-    """Test process_csv raises error on empty key."""
+    """Test process_csv raises error on empty key in CSV data."""
     join_util.init(config)
 
     file_obj = FileObject(
@@ -517,7 +527,7 @@ def test_process_csv_empty_key(config, mock_provider, csv_empty_keys):
 
 
 def test_process_csv_duplicate_key(config, mock_provider, csv_duplicate_keys):
-    """Test process_csv raises error on duplicate key."""
+    """Test process_csv raises error on duplicate key in CSV data."""
     join_util.init(config)
 
     file_obj = FileObject(
@@ -731,6 +741,28 @@ def test_process_csv_missing_join_key(config, mock_provider,
     }
 
     with pytest.raises(ValueError, match='not found in CSV fields'):
+        join_util.process_csv('test_collection', mock_provider,
+                              form_data)
+
+
+def test_process_csv_bad_collection_key(config, mock_provider,
+                                        valid_csv_content):
+    """Test process_csv raises error when collection key does not exist."""
+    join_util.init(config)
+
+    file_obj = FileObject(
+        name='test.csv',
+        buffer=BytesIO(valid_csv_content),
+        content_type='text/csv'
+    )
+
+    form_data = {
+        'collectionKey': 'nonexistent_key',  # not in collection
+        'joinKey': 'id',
+        'joinFile': file_obj
+    }
+
+    with pytest.raises(ValueError, match='not found in feature collection'):
         join_util.process_csv('test_collection', mock_provider,
                               form_data)
 

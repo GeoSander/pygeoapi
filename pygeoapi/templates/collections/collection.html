@@ -73,6 +73,17 @@
               {% trans %}Display Schema of{% endtrans %} "{{ data['title'] }}"</a></div>
         </li>
       </ul>
+        {% if data['itemType'] == 'feature' and data['supports_joins'] %}
+      <h3>{% trans %}Joins{% endtrans %}</h3>
+      <ul>
+        <li>
+          <div>
+            <a title="{% trans %}Display Join Sources{% endtrans %}" href="{{ data['collections_path'] }}/{{ data['id'] }}/joins">
+              {% trans %}Display available join sources for{% endtrans %} "{{ data['title'] }}"</a>
+          </div>
+        </li>
+      </ul>
+        {% endif %}
       {% for provider in config['resources'][data['id']]['providers'] %}
         {% if 'tile' in provider['type'] %}
       <h3>{% trans %}Tiles{% endtrans %}</h3>

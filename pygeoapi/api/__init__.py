@@ -637,17 +637,15 @@ class API:
         self.api_headers = get_api_rules(self.config).response_headers
         self.base_url = get_base_url(self.config)
         self.prefetcher = UrlPrefetcher()
+        self.supports_joins = False
 
         setup_logger(self.config['logging'])
 
-        joins_api = all_apis().get('joins')
-        if joins_api:
+        joins_init = getattr(all_apis().get('joins', object()), 'init', None)
+        if callable(joins_init):
             # Initialize OGC API - Joins:
             # build reference cache of join tables already/still on the server
-            self.supports_joins = joins_api.init(config)
-        else:
-            # Set flag so other methods know OGC API - Joins is unavailable
-            self.supports_joins = False
+            self.supports_joins = joins_init(config)
 
         CHARSET[0] = config['server'].get('encoding', 'utf-8')
         if config['server'].get('gzip'):
@@ -1186,6 +1184,20 @@ def describe_collections(api: API, request: APIRequest,
                     'href': f'{api.get_collections_url()}/{k}/items?f={value.f}'  # noqa
                 })
 
+            if api.supports_joins and collection_data_type == 'feature':
+                # Add links to available OGC API - Joins sources, if any
+                collection['links'].extend([{
+                    'type': FORMAT_TYPES[F_JSON],
+                    'rel': 'http://www.opengis.net/def/rel/ogc/1.0/joins',
+                    'title': l10n.translate('Join sources for this collection as JSON', request.locale),  # noqa
+                    'href': f'{api.get_collections_url()}/{k}/joins?f={F_JSON}'
+                }, {
+                    'type': FORMAT_TYPES[F_HTML],
+                    'rel': 'http://www.opengis.net/def/rel/ogc/1.0/joins',
+                    'title': l10n.translate('Join sources for this collection as HTML', request.locale),  # noqa
+                    'href': f'{api.get_collections_url()}/{k}/joins?f={F_HTML}'
+                }])
+
         # OAPIF Part 2 - list supported CRSs and StorageCRS
         if collection_data_type in ['edr', 'feature']:
             collection['crs'] = get_supported_crs_list(collection_data)
@@ -1428,6 +1440,7 @@ def describe_collections(api: API, request: APIRequest,
         })
 
     if request.format == F_HTML:  # render
+        fcm['supports_joins'] = api.supports_joins
         fcm['base_url'] = api.base_url
         fcm['collections_path'] = api.get_collections_url()
         if dataset is not None:

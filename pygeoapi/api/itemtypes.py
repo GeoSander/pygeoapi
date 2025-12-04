@@ -570,6 +570,17 @@ def get_collection_items(
             err.http_status_code, headers, request.format,
             err.ogc_exception_code, err.message)
 
+    serialized_query_params = ''
+    for k, v in request.params.items():
+        if k not in ('f', 'offset'):
+            serialized_query_params += '&'
+            serialized_query_params += urllib.parse.quote(k, safe='')
+            serialized_query_params += '='
+            serialized_query_params += urllib.parse.quote(str(v), safe=',')
+
+    if 'links' not in content:
+        content['links'] = []
+
     if join_id:
         # Post-process FeatureCollection and join with CSV data
         try:
@@ -596,16 +607,23 @@ def get_collection_items(
                 'NoApplicableCode', msg
             )
 
-    serialized_query_params = ''
-    for k, v in request.params.items():
-        if k not in ('f', 'offset'):
-            serialized_query_params += '&'
-            serialized_query_params += urllib.parse.quote(k, safe='')
-            serialized_query_params += '='
-            serialized_query_params += urllib.parse.quote(str(v), safe=',')
-
-    if 'links' not in content:
-        content['links'] = []
+        joins_uri = f'{api.get_collections_url()}/{dataset}/joins'
+        content['links'].extend([{
+            'type': FORMAT_TYPES[F_JSON],
+            'rel': request.get_linkrel(F_JSON),
+            'title': l10n.translate('Join source details as JSON', request.locale),  # noqa
+            'href': f'{joins_uri}/{join_id}?f={F_JSON}'
+        }, {
+            'type': FORMAT_TYPES[F_JSONLD],
+            'rel': request.get_linkrel(F_JSONLD),
+            'title': l10n.translate('Join source details as RDF (JSON-LD)', request.locale),  # noqa
+            'href': f'{joins_uri}/{join_id}?f={F_JSONLD}'
+        }, {
+            'type': FORMAT_TYPES[F_HTML],
+            'rel': request.get_linkrel(F_HTML),
+            'title': l10n.translate('Join source details as HTML', request.locale),  # noqa
+            'href': f'{joins_uri}/{join_id}?f={F_HTML}'
+        }])
 
     # TODO: translate titles
     uri = f'{api.get_collections_url()}/{dataset}/items'
@@ -1056,6 +1074,21 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
 
     from pygeoapi.openapi import OPENAPI_YAML, get_visible_collections
 
+    # We should add a joinId query parameter if OGC API - Joins is enabled
+    joins_enabled = join_util.enabled(cfg)
+
+    join_id_param = {
+        'name': 'joinId',
+        'in': 'query',
+        'description': 'The ID of the source to be joined to the result',
+        'required': False,
+        'style': 'form',
+        'explode': False,
+        'schema': {
+            'type': 'string'
+        }
+    }
+
     limit = {
         'name': 'limit',
         'in': 'query',
@@ -1161,6 +1194,10 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                     }
                 }
             }
+
+            if joins_enabled:
+                # Inject joinId parameter into the GET /items operation
+                paths[items_path]['get']['parameters'].append(join_id_param)
 
             # TODO: update feature POSTs once updated in OGC API - Features
             # https://github.com/opengeospatial/ogcapi-features/issues/771

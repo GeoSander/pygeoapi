@@ -76,6 +76,7 @@ class BaseProvider:
         self.properties = provider_def.get('properties', [])
         self.file_types = provider_def.get('file_types', [])
         self.include_extra_query_parameters = provider_def.get('include_extra_query_parameters', False)  # noqa
+        self.key_fields = provider_def.get('key_fields', [])
         self._fields = {}
         self.filename = None
 

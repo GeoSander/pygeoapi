@@ -183,11 +183,11 @@ def _valid_id(join_id: Any) -> bool:
     return True
 
 
-def init(config: dict) -> bool:
+def enabled(config: dict) -> bool:
     """
-    Parses the join configuration (if any).
-    Builds the initial join source reference cache.
-    Should be called when the API initializes.
+    Returns True if the OGC API - Joins extension is enabled (from config).
+    Note that init() does not have to be called to yet.
+    This method can be used in OpenAPI generation.
 
     :param config: pygeoapi configuration dictionary
 
@@ -198,7 +198,26 @@ def init(config: dict) -> bool:
     _CONFIG = JoinConfig.from_dict(config)
     if not _CONFIG.enabled:
         # pygeoapi has not been configured with OGC API - Joins
-        LOGGER.info('OGC API - Joins has not been configured')
+        LOGGER.debug('OGC API - Joins has not been configured')
+        return False
+
+    LOGGER.debug('OGC API - Joins has been configured')
+    return True
+
+
+def init(config: dict) -> bool:
+    """
+    Builds the initial join source reference cache if OGC API - Joins was
+    configured and performs a cleanup to remove stale sources.
+
+    Should be called when the API initializes.
+    Immediately returns False if OGC API - Joins was not configured.
+
+    :param config: pygeoapi configuration dictionary
+
+    :returns: True if OGC API - Joins was configured, False otherwise
+    """
+    if not enabled(config):
         return False
 
     # Read all files from dir that match 'table-{uuid}.json'
@@ -218,7 +237,7 @@ def init(config: dict) -> bool:
     # remove stale sources
     _cleanup_sources()
 
-    LOGGER.info('OGC API - Joins was configured')
+    LOGGER.info('OGC API - Joins initialized successfully')
     return True
 
 
@@ -227,7 +246,7 @@ def collection_keys(provider: dict,
     """
     Retrieves the key field configuration for the given feature provider.
 
-    :param provider: feature provider
+    :param provider: feature provider configuration
     :param collection_name: name of feature collection
 
     :returns: list of key fields
@@ -277,6 +296,11 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
     left_dataset_key = form_data['collectionKey']
     right_dataset_key = form_data['joinKey']
     csv_data = form_data['joinFile']
+
+    if not (left_dataset_key == collection_provider.id_field or
+            left_dataset_key in (k['id'] for k in collection_provider.key_fields)):  # noqa
+        raise ValueError(f'collectionKey \'{left_dataset_key}\' not found '
+                         f'in feature collection \'{collection_name}\'')
 
     if not isinstance(csv_data, util.FileObject):
         raise ValueError(f'join source data must be a '
@@ -496,7 +520,8 @@ def perform_join(feature_collection: dict, collection_name: str,
     :param collection_name: name of feature collection
     :param join_id: ID of the join data source to retrieve
 
-    :raises: ValueError if the join source does not exist
+    :raises: ValueError if the join_id is invalid,
+             KeyError if the join source does not exist
     """
 
     source_dict = read_join_source(collection_name, join_id)
@@ -518,9 +543,6 @@ def perform_join(feature_collection: dict, collection_name: str,
             join_count += 1
         else:
             feature['joined'] = False
-
-    # TODO: update links if there are joins?
-    # That would contain useful info about the join source
 
     # Now add join count as foreign member on FeatureCollection
     feature_collection['numberJoined'] = join_count
