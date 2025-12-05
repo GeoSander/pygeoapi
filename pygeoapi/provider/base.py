@@ -76,7 +76,7 @@ class BaseProvider:
         self.properties = provider_def.get('properties', [])
         self.file_types = provider_def.get('file_types', [])
         self.include_extra_query_parameters = provider_def.get('include_extra_query_parameters', False)  # noqa
-        self.key_fields = provider_def.get('key_fields', [])
+        self._keys = provider_def.get('key_fields', [])
         self._fields = {}
         self.filename = None
 
@@ -100,6 +100,67 @@ class BaseProvider:
         """
 
         raise NotImplementedError()
+
+    def get_key_fields(self) -> dict:
+        """
+        Get provider key field information (names, types, default)
+
+        Example response:
+            {
+                'field1': {'type': 'string', 'default': True},
+                'field2': {'type': 'integer', 'default': False}
+            }
+
+        :returns: dict of key fields and their associated JSON Schema types
+        """
+        default_key = None
+        key_fields = {}
+        if self.type != 'feature':
+            # not a feature collection: there cannot be any key fields
+            return {}
+        if not self.fields:
+            if not self.id_field:
+                # not initialized with an ID field: return empty dict
+                return {}
+            else:
+                # no fields: we can only return ID field as default key
+                return {self.id_field: {'default': True}}
+
+        for key in self._keys:
+            key_name = key['id']
+
+            is_default = key.get('default', False)
+            if is_default:
+                # check if admin configured multiple defaults
+                if default_key:
+                    raise ProviderGenericError(
+                        f'multiple default key fields configured '
+                        f'for feature collection \'{self.name}\'')
+                default_key = key_name
+
+            field_info = self.fields.get(key_name, {})
+            if not field_info and key_name != self.id_field:
+                # check if admin configured a key field that exists:
+                # ID field is excluded from this check
+                raise ProviderGenericError(
+                    f'key field \'{key_name}\' not found in '
+                    f'feature collection \'{self.name}\'')
+
+            # Add field to output
+            field_info['default'] = is_default
+            key_fields[key_name] = field_info
+
+        if self.id_field not in key_fields:
+            # Always add ID field as key field, even if not configured
+            field_info = self.fields.get(self.id_field, {})
+            field_info['default'] = False
+            key_fields[self.id_field] = field_info
+
+        if default_key is None:
+            # If no default key was configured, use ID field as default
+            key_fields[self.id_field]['default'] = True
+
+        return key_fields
 
     @property
     def fields(self) -> dict:

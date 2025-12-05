@@ -1,0 +1,204 @@
+{% extends "_base.html" %}
+{% block title %}{{ super() }} {{ data['title'] }} {% endblock %}
+{% block crumbs %}{{ super() }}
+/ <a href="{{ data['collections_path'] }}">{% trans %}Collections{% endtrans %}</a>
+/ <a href="{{ data['dataset_path'] }}">{{ data['title'] | truncate( 25 ) }}</a>
+/ <a href="{{ data['dataset_path'] }}/joins">{% trans %}Joins{% endtrans %}</a>
+{% endblock %}
+{% block body %}
+    <section id="collection-joins">
+      <h1>{{ data['title'] }}</h1>
+      <p>{{ data['description'] }}</p>
+      <p>
+        {% for kw in data['keywords'] %}
+          <span class="badge text-bg-primary bg-primary">{{ kw }}</span>
+        {% endfor %}
+      </p>
+      <h3>{% trans %}Joins{% endtrans %}</h3>
+      <p>
+      {% trans %}
+          Below is a list of all available join sources for this collection.<br/>
+          If there aren't any joins, you can <a href="#create-join">create one</a>.
+      {% endtrans %}
+      </p>
+      {% for join in data['joins'] %}
+        <h4>{{ join['id'] }} - {{ join['timeStamp'] }}</h4>
+        <ul>
+        {% for link in join['links'] %}
+            <li>
+              <a title="{{ link['rel'] }}" href="{{ link['href'] }}">
+                <span>{{ link['title'] }}</span> (<span>{{ link['type'] }}</span>)
+              </a>
+            </li>
+        {% endfor %}
+        </ul>
+      {% endfor %}
+    </section>
+    <section id="create-join">
+      <h4>{% trans %}Upload a join source (CSV){% endtrans %}</h4>
+      <form method="POST" action="{{ data['dataset_path'] }}/joins" enctype="multipart/form-data" class="join-form">
+        <!-- Required Fields -->
+        <div class="form-group">
+          <label for="collectionKey" class="required">
+            {% trans %}Collection Key{% endtrans %} <span class="text-danger">*</span>
+          </label>
+          <select id="collectionKey"
+                  name="collectionKey"
+                  class="form-control"
+                  required
+                  aria-describedby="collectionKeyHelp">
+            <option value="" disabled selected>{% trans %}Select a key field{% endtrans %}</option>
+            {% for key_field in data['key_fields'] %}
+              <option value="{{ key_field['id'] }}" {% if key_field.get('default', False) %}selected{% endif %}>
+                {{ key_field['id'] }}{% if key_field.get('default', False) %} ({% trans %}default{% endtrans %}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <small id="collectionKeyHelp" class="form-text text-muted">
+            {% trans %}
+                Collection key field to join on.
+            {% endtrans %}
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label for="joinFile" class="required">
+            {% trans %}CSV File{% endtrans %} <span class="text-danger">*</span>
+          </label>
+          <input type="file"
+                 id="joinFile"
+                 name="joinFile"
+                 class="form-control-file"
+                 accept=".csv,text/csv,application/csv"
+                 required
+                 aria-describedby="joinFileHelp">
+          <small id="joinFileHelp" class="form-text text-muted">
+            {% trans %}CSV file to upload{% endtrans %}
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label for="joinKey" class="required">
+            {% trans %}CSV Key{% endtrans %} <span class="text-danger">*</span>
+          </label>
+          <input type="text"
+                 id="joinKey"
+                 name="joinKey"
+                 class="form-control"
+                 required
+                 placeholder="{% trans %}e.g., city_id{% endtrans %}"
+                 aria-describedby="joinKeyHelp">
+          <small id="joinKeyHelp" class="form-text text-muted">
+            {% trans %}CSV key field to join on{% endtrans %}
+          </small>
+        </div>
+
+        <!-- Optional Fields -->
+        <h5 class="mt-4">{% trans %}Optional Parameters{% endtrans %}</h5>
+
+        <div class="form-group">
+          <label for="joinFields">
+            {% trans %}CSV Fields{% endtrans %}
+          </label>
+          <input type="text"
+                 id="joinFields"
+                 name="joinFields"
+                 class="form-control"
+                 placeholder="{% trans %}e.g., name,population,area{% endtrans %}"
+                 aria-describedby="joinFieldsHelp">
+          <small id="joinFieldsHelp" class="form-text text-muted">
+            {% trans %}
+                Comma-separated case-sensitive names of CSV fields to append when joining.
+                Leave empty to include all (non-conflicting) fields.
+            {% endtrans %}
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label for="csvDelimiter">
+            {% trans %}CSV Delimiter{% endtrans %}
+          </label>
+          <input type="text"
+                 id="csvDelimiter"
+                 name="csvDelimiter"
+                 class="form-control"
+                 value=","
+                 maxlength="1"
+                 placeholder=","
+                 aria-describedby="csvDelimiterHelp">
+          <small id="csvDelimiterHelp" class="form-text text-muted">
+            {% trans %}CSV field delimiter (defaults to ','){% endtrans %}
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label for="csvHeaderRow">
+            {% trans %}Header Row{% endtrans %}
+          </label>
+          <input type="number"
+                 id="csvHeaderRow"
+                 name="csvHeaderRow"
+                 class="form-control"
+                 value="1"
+                 min="1"
+                 placeholder="1"
+                 aria-describedby="csvHeaderRowHelp">
+          <small id="csvHeaderRowHelp" class="form-text text-muted">
+            {% trans %}Row number that contains the field names (defaults to 1){% endtrans %}
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label for="csvDataStartRow">
+            {% trans %}Data Start Row{% endtrans %}
+          </label>
+          <input type="number"
+                 id="csvDataStartRow"
+                 name="csvDataStartRow"
+                 class="form-control"
+                 value="2"
+                 min="1"
+                 placeholder="2"
+                 aria-describedby="csvDataStartRowHelp">
+          <small id="csvDataStartRowHelp" class="form-text text-muted">
+            {% trans %}Row number from where to start reading the data (defaults to 2){% endtrans %}
+          </small>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="form-group mt-4">
+          <button type="submit" class="btn btn-primary">
+            {% trans %}Create Join{% endtrans %}
+          </button>
+          <button type="reset" class="btn btn-secondary ml-2">
+            {% trans %}Reset{% endtrans %}
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <style>
+      .join-form {
+        max-width: 800px;
+        margin: 2rem 0;
+      }
+      .form-group {
+        margin-bottom: 1.5rem;
+      }
+      .form-group label.required {
+        font-weight: 600;
+      }
+      .form-control, .form-control-file {
+        margin-top: 0.5rem;
+      }
+      .text-danger {
+        color: #dc3545;
+      }
+      .ml-2 {
+        margin-left: 0.5rem;
+      }
+      .mt-4 {
+        margin-top: 1.5rem;
+      }
+    </style>
+{% endblock %}

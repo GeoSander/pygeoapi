@@ -32,7 +32,6 @@ import logging
 import re
 import tempfile
 import uuid
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from functools import lru_cache
@@ -241,39 +240,6 @@ def init(config: dict) -> bool:
     return True
 
 
-def collection_keys(provider: dict,
-                    collection_name: str) -> list[dict[str, str]]:
-    """
-    Retrieves the key field configuration for the given feature provider.
-
-    :param provider: feature provider configuration
-    :param collection_name: name of feature collection
-
-    :returns: list of key fields
-    """
-    id_field = provider['id_field']
-    key_fields = deepcopy(provider.get('key_fields', []))
-    default_key = None
-    id_field_found = False
-
-    for key in key_fields:
-        if key.get('default', False):
-            if default_key:
-                raise ValueError(f'multiple default key fields configured for '
-                                 f'feature collection \'{collection_name}\'')
-            default_key = key['id']
-        if key['id'] == id_field:
-            id_field_found = True
-
-    if not id_field_found:
-        key_fields.append({
-            'id': id_field,
-            'default': True if default_key in (None, id_field) else False,
-        })
-
-    return key_fields
-
-
 def process_csv(collection_name: str, collection_provider: BaseProvider,
                 form_data: dict) -> dict:
     """
@@ -297,8 +263,7 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
     right_dataset_key = form_data['joinKey']
     csv_data = form_data['joinFile']
 
-    if not (left_dataset_key == collection_provider.id_field or
-            left_dataset_key in (k['id'] for k in collection_provider.key_fields)):  # noqa
+    if left_dataset_key not in collection_provider.get_key_fields():
         raise ValueError(f'collectionKey \'{left_dataset_key}\' not found '
                          f'in feature collection \'{collection_name}\'')
 

@@ -36,7 +36,7 @@ from pygeoapi.api import (
 )
 from pygeoapi.openapi import get_visible_collections
 from pygeoapi.plugin import load_plugin
-from pygeoapi.provider.base import ProviderTypeError
+from pygeoapi.provider.base import ProviderTypeError, ProviderGenericError
 from pygeoapi.util import (
     get_provider_by_type, to_json, filter_providers_by_type,
     filter_dict_by_key_value, get_current_datetime
@@ -765,8 +765,8 @@ def create_join(api: API, request: APIRequest,
         LOGGER.error(f'Invalid parameter value: {e}', exc_info=True)
         return _not_found(api, request, headers, msg)
     except Exception as e:
-        LOGGER.error(f'Failed to retrieve join: {e}', exc_info=True)
-        msg = f'Failed to retrieve join: {str(e)}'
+        LOGGER.error(f'Failed to create join: {e}', exc_info=True)
+        msg = f'Failed to create join: {str(e)}'
         return _server_error(api, request, headers, msg)
 
     # Set response language to requested provider locale
@@ -840,11 +840,16 @@ def key_fields(api: API, request: APIRequest,
     try:
         provider_def = get_provider_by_type(
             collections[dataset]['providers'], 'feature')
+        provider = load_plugin('provider', provider_def)
     except ProviderTypeError:
         msg = f'Feature provider not found for collection: {dataset}'
         return _bad_request(api, request, headers, msg)
 
-    fields = join_util.collection_keys(provider_def, dataset)
+    try:
+        fields = provider.get_key_fields()
+    except ProviderGenericError as e:
+        LOGGER.error(f'Error retrieving key fields: {e}', exc_info=True)
+        return _server_error(api, request, headers, str(e))
 
     # Get provider locale (if any)
     prv_locale = l10n.get_plugin_locale(provider_def, request.raw_locale)
@@ -872,12 +877,12 @@ def key_fields(api: API, request: APIRequest,
         'keys': []
     }
 
-    for field in fields:
-        field_id = field['id']
+    for name, info in fields:
         content['keys'].append({
-            'id': field_id,
-            'isDefault': field.get('default', False),
-            'language': prv_locale.language
+            'id': name,
+            'type': info.get('type'),  # not always set (e.g. for ID)
+            'isDefault': info['default'],
+            'language': prv_locale.language  # TODO: is this really useful?
         })
 
     # Set response language to requested provider locale

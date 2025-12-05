@@ -72,6 +72,14 @@ def test_initialization_with_optional_fields(extended_provider_def):
     assert provider.title_field == "title"
     assert provider.properties == ["prop1", "prop2"]
     assert provider.file_types == [".geojson", ".json"]
+    assert provider.include_extra_query_parameters is False
+    assert provider._fields == {}
+    assert provider.filename is None
+    assert provider.axes == []
+    assert provider.crs is None
+    assert provider.num_bands is None
+    assert provider._keys == []
+    assert provider.get_key_fields() == {'feature_id': {'default': True}}
 
 
 def test_default_values(basic_provider):
@@ -92,6 +100,8 @@ def test_default_values(basic_provider):
     assert basic_provider.axes == []
     assert basic_provider.crs is None
     assert basic_provider.num_bands is None
+    assert basic_provider._keys == []
+    assert basic_provider.get_key_fields() == {}
 
 
 @pytest.mark.parametrize("missing_field,config", [

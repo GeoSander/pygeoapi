@@ -73,6 +73,26 @@ def station_config():
 
 
 @pytest.fixture()
+def joins_config():
+    return {
+        'name': 'CSV',
+        'type': 'feature',
+        'data': path,
+        'id_field': 'id',
+        'geometry': {
+            'x_field': 'long',
+            'y_field': 'lat'
+        },
+        'key_fields': [
+            {
+                'id': 'stn_id',
+                'default': False
+            }
+        ]
+    }
+
+
+@pytest.fixture()
 def malformatted_config():
     return {
         'name': 'CSV',
@@ -193,3 +213,13 @@ def test_get_malformed(malformatted_config, caplog):
     assert results['numberReturned'] == 5
     assert results['features'][3]['geometry']['coordinates'] is None
     assert results['features'][4]['geometry']['coordinates'] is None
+
+
+def test_key_fields(joins_config):
+    p = CSVProvider(joins_config)
+    key_fields = p.get_key_fields()
+    assert len(key_fields) == 2
+    assert key_fields['id']['type'] == 'string'
+    assert key_fields['id']['default'] is True
+    assert key_fields['stn_id']['type'] == 'integer'
+    assert key_fields['stn_id']['default'] is False

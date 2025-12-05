@@ -154,8 +154,7 @@ def mock_provider():
     provider.type = 'feature'
     provider.id_field = 'id'
     provider.get.return_value = {
-        'id_field': 'id',
-        'key_fields': []
+        'id_field': 'id'
     }
 
     def mock_get_fields():
@@ -165,8 +164,14 @@ def mock_provider():
             'existing_field': {'type': 'string'}
         }
 
+    def mock_get_key_fields():
+        return {
+            'id': {'type': 'string', 'default': True},
+            'existing_field': {'type': 'string', 'default': False}
+        }
+
     provider.get_fields = mock_get_fields
-    provider.key_fields = provider.get.return_value['key_fields']
+    provider.get_key_fields = mock_get_key_fields
     return provider
 
 
@@ -1101,73 +1106,6 @@ def test_remove_source_removes_collection(config, mock_provider,
 
     # Collection key should be removed from cache
     assert 'test_collection' not in join_util._REF_CACHE
-
-
-# Test collection_keys
-def test_collection_keys_default_id_field(mock_provider):
-    """Test collection_keys includes id_field by default."""
-    provider_dict = {
-        'id_field': 'feature_id',
-        'key_fields': []
-    }
-
-    keys = join_util.collection_keys(provider_dict,
-                                     'test_collection')
-
-    assert len(keys) == 1
-    assert keys[0]['id'] == 'feature_id'
-    assert keys[0]['default'] is True
-
-
-def test_collection_keys_with_custom_keys(mock_provider):
-    """Test collection_keys with custom key fields."""
-    provider_dict = {
-        'id_field': 'id',
-        'key_fields': [
-            {'id': 'custom_key', 'default': True},
-            {'id': 'another_key', 'default': False}
-        ]
-    }
-
-    keys = join_util.collection_keys(provider_dict,
-                                     'test_collection')
-
-    assert len(keys) == 3  # custom_key, another_key, id
-    assert any(k['id'] == 'custom_key' and k['default'] for k in keys)
-    assert any(k['id'] == 'id' and not k['default'] for k in keys)
-
-
-def test_collection_keys_duplicate_default_raises(mock_provider):
-    """Test collection_keys raises error with multiple default keys."""
-    provider_dict = {
-        'id_field': 'id',
-        'key_fields': [
-            {'id': 'key1', 'default': True},
-            {'id': 'key2', 'default': True}  # Duplicate default
-        ]
-    }
-
-    with pytest.raises(ValueError, match='multiple default key fields'):
-        join_util.collection_keys(provider_dict,
-                                  'test_collection')
-
-
-def test_collection_keys_id_field_already_in_keys(mock_provider):
-    """Test collection_keys doesn't duplicate id_field if already present."""
-    provider_dict = {
-        'id_field': 'id',
-        'key_fields': [
-            {'id': 'id', 'default': True}
-        ]
-    }
-
-    keys = join_util.collection_keys(provider_dict,
-                                     'test_collection')
-
-    # Should not duplicate 'id'
-    assert len(keys) == 1
-    assert keys[0]['id'] == 'id'
-    assert keys[0]['default'] is True
 
 
 # Test cleanup_sources

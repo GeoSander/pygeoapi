@@ -30,12 +30,13 @@
 
 import json
 import pytest
+from pathlib import Path
 
 from pygeoapi.provider.base import ProviderItemNotFoundError
 from pygeoapi.provider.geojson import GeoJSONProvider
 
 
-path = '/tmp/test.geojson'
+path = Path('/tmp/test.geojson')
 
 
 @pytest.fixture()
@@ -55,6 +56,8 @@ def fixture():
         ]
     }
 
+    if not path.parent.exists():
+        path.parent.mkdir(parents=True)
     with open(path, 'w') as fh:
         fh.write(json.dumps(data))
     return path
@@ -169,3 +172,11 @@ def test_update(fixture, config):
     # Should be changed
     results = p.get('123-456')
     assert 'Null' in results['properties']['name']
+
+
+def test_key_fields(fixture, config):
+    p = GeoJSONProvider(config)
+    key_fields = p.get_key_fields()
+    assert len(key_fields) == 1
+    assert key_fields['id'].get('type') is None  # GeoJSON provider ignores ID
+    assert key_fields['id']['default'] is True
