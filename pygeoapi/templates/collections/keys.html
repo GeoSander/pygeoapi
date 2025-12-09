@@ -1,0 +1,30 @@
+{% extends "_base.html" %}
+{% block title %}{{ super() }} {{ data['title'] }} {% endblock %}
+{% block crumbs %}{{ super() }}
+/ <a href="{{ data['collections_path'] }}">{% trans %}Collections{% endtrans %}</a>
+/ <a href="{{ data['dataset_path'] }}">{{ data['title'] | truncate( 25 ) }}</a>
+/ <a href="{{ data['dataset_path'] }}/keys">{% trans %}Keys{% endtrans %}</a>
+{% endblock %}
+{% block body %}
+    <section id="collection-keys">
+      <h1>{{ data['title'] }}</h1>
+      <p>{{ data['description'] }}</p>
+      <p>
+        {% for kw in data['keywords'] %}
+          <span class="badge text-bg-primary bg-primary">{{ kw }}</span>
+        {% endfor %}
+      </p>
+      <p>
+        {% trans %}Below is a list of all available collection key fields on which a{% endtrans %}
+        <a href="{{ data['dataset_path'] }}/joins">{% trans %}join{% endtrans %}</a>
+        {% trans %}can be made.{% endtrans %}<br/>
+        {% trans %}Key fields can be defined in the pygeoapi configuration.{% endtrans %}
+      </p>
+      {% for key in data['keys'] %}
+        <ul>
+            <li><b>{{ key['id'] }}</b> {% if key['isDefault'] %}(default){% endif %}
+                {% if key['type'] %} - <i>{{ key['type'] }}</i>{% endif %}</li>
+        </ul>
+      {% endfor %}
+    </section>
+{% endblock %}

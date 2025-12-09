@@ -30,6 +30,8 @@
 """Generic util functions used in the code"""
 
 import base64
+
+from babel import Locale
 from filelock import FileLock
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -415,8 +417,9 @@ def is_url(urlstring: str) -> bool:
         return False
 
 
-def render_j2_template(config: dict, tpl_config: dict, template: Path,
-                       data: dict, locale_: str = None) -> str:
+def render_j2_template(config: dict, tpl_config: dict,
+                       template: str | os.PathLike[str],
+                       data: dict, locale_: str | Locale = None) -> str:
     """
     render Jinja2 template
 

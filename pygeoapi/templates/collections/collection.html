@@ -74,6 +74,15 @@
         </li>
       </ul>
         {% if data['itemType'] == 'feature' and data['supports_joins'] %}
+      <h3>{% trans %}Keys{% endtrans %}</h3>
+      <ul>
+        <li>
+          <div>
+            <a title="{% trans %}Display Keys{% endtrans %}" href="{{ data['collections_path'] }}/{{ data['id'] }}/keys">
+              {% trans %}Display available collection key fields for{% endtrans %} "{{ data['title'] }}"</a>
+          </div>
+        </li>
+      </ul>
       <h3>{% trans %}Joins{% endtrans %}</h3>
       <ul>
         <li>

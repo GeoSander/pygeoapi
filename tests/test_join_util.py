@@ -176,6 +176,17 @@ def mock_provider():
 
 
 @pytest.fixture
+def single_feature():
+    """Single GeoJSON feature."""
+    return {
+        'type': 'Feature',
+        'id': '1',
+        'properties': {'id': '1', 'name': 'Feature 1'},
+        'geometry': {'type': 'Point', 'coordinates': [1, 1]}
+    }
+
+
+@pytest.fixture
 def feature_collection():
     """Sample GeoJSON FeatureCollection."""
     return {
@@ -267,7 +278,7 @@ def test_init_enabled_empty_dir(config):
     """Test init with joins enabled and empty directory."""
     result = join_util.init(config)
     assert result is True
-    assert len(join_util._REF_CACHE) == 0
+    assert len(join_util._source_ref_cache()) == 0
 
 
 # This test has to be run here, else there will already be files
@@ -305,8 +316,8 @@ def test_init_loads_existing_sources(config):
 
     result = join_util.init(config)
     assert result is True
-    assert 'test_collection' in join_util._REF_CACHE
-    assert source_id in join_util._REF_CACHE['test_collection']
+    assert 'test_collection' in join_util._source_ref_cache()
+    assert source_id in join_util._source_ref_cache()['test_collection']
 
 
 def test_init_ignores_invalid_files(config):
@@ -320,7 +331,7 @@ def test_init_ignores_invalid_files(config):
 
     result = join_util.init(config)
     assert result is True
-    assert len(join_util._REF_CACHE) == 0
+    assert len(join_util._source_ref_cache()) == 0
 
 
 # Test helper functions
@@ -773,9 +784,9 @@ def test_process_csv_bad_collection_key(config, mock_provider,
 
 
 def test_process_csv_updates_cache(config, mock_provider, valid_csv_content):
-    """Test process_csv updates REF_CACHE."""
+    """Test process_csv updates _source_ref_cache()."""
     join_util.init(config)
-    init_size = len(join_util._REF_CACHE.get('test_collection', {}))
+    init_size = len(join_util._source_ref_cache().get('test_collection', {}))
 
     file_obj = FileObject(
         name='test.csv',
@@ -792,9 +803,9 @@ def test_process_csv_updates_cache(config, mock_provider, valid_csv_content):
     result = join_util.process_csv('test_collection',
                                    mock_provider, form_data)
 
-    assert 'test_collection' in join_util._REF_CACHE
-    assert len(join_util._REF_CACHE['test_collection']) == init_size + 1
-    assert result['id'] in join_util._REF_CACHE['test_collection']
+    assert 'test_collection' in join_util._source_ref_cache()
+    assert len(join_util._source_ref_cache()['test_collection']) == init_size + 1  # noqa
+    assert result['id'] in join_util._source_ref_cache()['test_collection']
 
 
 def test_process_csv_creates_file(config, mock_provider, valid_csv_content):
@@ -817,7 +828,7 @@ def test_process_csv_creates_file(config, mock_provider, valid_csv_content):
                                    mock_provider, form_data)
 
     # Check file exists
-    ref = join_util._REF_CACHE['test_collection'][result['id']]['ref']
+    ref = join_util._source_ref_cache()['test_collection'][result['id']]['ref']
     assert ref.exists()
 
     # Verify file content
@@ -935,7 +946,6 @@ def test_read_join_source_caching(config, mock_provider, valid_csv_content):
                                          join_id)
 
     assert result1 == result2
-    assert id(result1) == id(result2)  # Same object from cache
 
 
 # Test perform_join
@@ -970,6 +980,39 @@ def test_perform_join_success(config, mock_provider, valid_csv_content,
 
     # Check joined flag
     assert feature_collection['features'][0]['joined'] is True
+
+
+def test_perform_join_feature(config, mock_provider, valid_csv_content,
+                              single_feature):
+    """Test perform_join adds fields to single feature."""
+    join_util.init(config)
+
+    file_obj = FileObject(
+        name='test.csv',
+        buffer=BytesIO(valid_csv_content),
+        content_type='text/csv'
+    )
+
+    form_data = {
+        'collectionKey': 'id',
+        'joinKey': 'id',
+        'joinFile': file_obj
+    }
+
+    created = join_util.process_csv('test_collection',
+                                    mock_provider, form_data)
+
+    # Perform join
+    join_util.perform_join(single_feature, 'test_collection',
+                           created['id'])
+
+    # Check that fields were added
+    assert 'name' in single_feature['properties']
+    assert 'population' in single_feature['properties']
+    assert single_feature['properties']['name'] == 'City A'
+
+    # Check joined flag
+    assert single_feature['joined'] is True
 
 
 def test_perform_join_partial_match(config, mock_provider, valid_csv_content,
@@ -1068,15 +1111,15 @@ def test_remove_source_success(config, mock_provider, valid_csv_content):
     join_id = created['id']
 
     # Verify source exists
-    assert 'test_collection' in join_util._REF_CACHE
-    assert join_id in join_util._REF_CACHE['test_collection']
+    assert 'test_collection' in join_util._source_ref_cache()
+    assert join_id in join_util._source_ref_cache()['test_collection']
 
     # Remove source
     result = join_util.remove_source('test_collection', join_id)
     assert result is True
 
     # Verify removal
-    assert join_id not in join_util._REF_CACHE.get('test_collection', {})
+    assert join_id not in join_util._source_ref_cache().get('test_collection', {})  # noqa
 
 
 def test_remove_source_removes_collection(config, mock_provider,
@@ -1105,7 +1148,7 @@ def test_remove_source_removes_collection(config, mock_provider,
     join_util.remove_source('test_collection', join_id)
 
     # Collection key should be removed from cache
-    assert 'test_collection' not in join_util._REF_CACHE
+    assert 'test_collection' not in join_util._source_ref_cache()
 
 
 # Test cleanup_sources
@@ -1125,22 +1168,33 @@ def test_cleanup_sources_by_max_days(config, mock_provider, valid_csv_content):
         'joinFile': file_obj
     }
 
+    init_size = len(join_util._source_ref_cache())
+
     # Create a source
-    created = join_util.process_csv('test_collection',
-                                    mock_provider, form_data)
-    join_id = created['id']
+    result = join_util.process_csv('test_collection',
+                                   mock_provider, form_data)
+
+    assert len(join_util._source_ref_cache()) == init_size + 1
+
+    join_id = result['id']
 
     # Mock timestamp to be old
     old_timestamp = (datetime.now(timezone.utc) - timedelta(days=10)).strftime(
         '%Y-%m-%dT%H:%M:%S.%fZ'
     )
-    join_util._REF_CACHE['test_collection'][join_id]['timeStamp'] = old_timestamp  # noqa
+
+    # Hack JSON file with old timestamp
+    result['timeStamp'] = old_timestamp
+    json_path = join_util._source_ref_cache()['test_collection'][join_id]['ref']  # noqa
+    with open(json_path, 'w+') as json_file:
+        json.dump(result, json_file)
 
     # Run cleanup
     join_util._cleanup_sources()
 
     # Old source should be removed (max_days=7 in config)
-    assert join_id not in join_util._REF_CACHE.get('test_collection', {})
+    assert join_id not in join_util._source_ref_cache().get('test_collection', {})  # noqa
+    assert len(join_util._source_ref_cache()) == init_size
 
 
 def test_cleanup_sources_by_max_files(config, mock_provider,
@@ -1174,7 +1228,7 @@ def test_cleanup_sources_by_max_files(config, mock_provider,
     join_util._cleanup_sources()
 
     # Should only keep 2 newest sources
-    remaining = join_util._REF_CACHE.get('test_collection', {})
+    remaining = join_util._source_ref_cache().get('test_collection', {})
     assert len(remaining) <= 2
 
 
@@ -1208,14 +1262,14 @@ def test_cleanup_sources_removes_nonexistent_files(config, mock_provider,
     join_id = created['id']
 
     # Manually delete the file
-    ref = join_util._REF_CACHE['test_collection'][join_id]['ref']
+    ref = join_util._source_ref_cache()['test_collection'][join_id]['ref']
     ref.unlink()
 
     # Run cleanup
     join_util._cleanup_sources()
 
     # Cache entry should be removed
-    assert join_id not in join_util._REF_CACHE.get('test_collection', {})
+    assert join_id not in join_util._source_ref_cache().get('test_collection', {})  # noqa
 
 
 # Test edge cases

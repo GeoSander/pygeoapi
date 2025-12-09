@@ -1,0 +1,46 @@
+{% extends "_base.html" %}
+{% block title %}{{ super() }} {{ data['title'] }} {% endblock %}
+{% block crumbs %}{{ super() }}
+/ <a href="{{ data['collections_path'] }}">{% trans %}Collections{% endtrans %}</a>
+/ <a href="{{ data['dataset_path'] }}">{{ data['title'] | truncate( 25 ) }}</a>
+/ <a href="{{ data['dataset_path'] }}/joins">{% trans %}Joins{% endtrans %}</a>
+/ <a href="{{ data['dataset_path'] }}/joins/{{ data['id'] }}">{{ data['id'] }}</a>
+{% endblock %}
+{% block body %}
+    <section id="join-details">
+      <h1>{{ data['title'] }}</h1>
+      <p>{{ data['description'] }}</p>
+      <p>
+        {% for kw in data['keywords'] %}
+          <span class="badge text-bg-primary bg-primary">{{ kw }}</span>
+        {% endfor %}
+      </p>
+      <h3>{{ data['id'] }}</h3>
+      {% set details = data['details'] %}
+      <ul>
+        <li><b>{% trans %}Created{% endtrans %}:</b> {{ details['created'] }}</li>
+        <li><b>{% trans %}Source File{% endtrans %}:</b> {{ details['joinSource'] }}</li>
+        <li><b>{% trans %}Number of Rows{% endtrans %}:</b> {{ details['numberOfRows'] }}</li>
+        <li><b>{% trans %}Collection Key{% endtrans %}:</b> {{ details['collectionKey'] }}</li>
+        <li><b>{% trans %}Join Source Key{% endtrans %}:</b> {{ details['joinKey'] }}</li>
+        <li>
+            <b>{% trans %}Included Fields{% endtrans %}:</b>
+            <ul>
+              {% for field in details['joinFields'] %}
+                <li>{{ field }}</li>
+              {% endfor %}
+            </ul>
+        </li>
+      </ul>
+      <h3>{% trans %}Apply Join{% endtrans %}</h3>
+      <ul>
+      {% for link in data['links'] if link['rel'] == 'items' %}
+        <li>
+          <a title="{{ link['rel'] }}" href="{{ link['href'] }}">
+            <span>{{ link['title'] }}</span> (<span>{{ link['type'] }}</span>)
+          </a>
+        </li>
+      {% endfor %}
+      </ul>
+    </section>
+{% endblock %}

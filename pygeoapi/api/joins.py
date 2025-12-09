@@ -39,7 +39,7 @@ from pygeoapi.plugin import load_plugin
 from pygeoapi.provider.base import ProviderTypeError, ProviderGenericError
 from pygeoapi.util import (
     get_provider_by_type, to_json, filter_providers_by_type,
-    filter_dict_by_key_value, get_current_datetime
+    filter_dict_by_key_value, get_current_datetime, render_j2_template
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -491,6 +491,32 @@ def _server_error(api: API, request: APIRequest, headers: dict,
     )
 
 
+def _render_html(api: API, request: APIRequest, dataset: str, template: str,
+                 title: str, data: dict, **data_kwargs) -> str:
+    """
+    Render HTML content for the API response.
+    Adds base_url, dataset_path, and collections_path URLs to the data dict
+    before the page is rendered.
+
+    :param api: API instance
+    :param request: A request object
+    :param dataset: Dataset name (collection key)
+    :param template: Template file path (relative)
+    :param title: Title of the HTML page
+    :param data: Data dictionary to be passed to the template
+    :param data_kwargs: Additional keyword arguments to update the data dict
+    """
+    collections_url = api.get_collections_url()
+    data['title'] = title
+    data['base_url'] = api.base_url
+    data['dataset_path'] = f'{collections_url}/{dataset}'
+    data['collections_path'] = collections_url
+    data.update(data_kwargs)
+    tpl_config = api.get_dataset_templates(dataset)
+    return render_j2_template(api.tpl_config, tpl_config,
+                              template, data, request.locale)
+
+
 def list_joins(api: API, request: APIRequest,
                collection: str) -> tuple[dict, int, str]:
     """
@@ -517,24 +543,24 @@ def list_joins(api: API, request: APIRequest,
     # Build the joins list with proper structure
     joins_list = []
     uri = f'{api.get_collections_url()}/{dataset}'
-    for source_id, source_obj in sources:
+    for source_id, source_obj in sources.items():
         join_item = {
             'id': source_id,
             'timeStamp': source_obj['timeStamp'],
             'links': [
                 {
                     'type': FORMAT_TYPES[F_JSON],
-                    'rel': request.get_linkrel(F_JSON),
+                    'rel': "join-source",
                     'title': l10n.translate('Join source details as JSON', request.locale),  # noqa
                     'href': f'{uri}/joins/{source_id}?f={F_JSON}'
                 }, {
                     'type': FORMAT_TYPES[F_JSONLD],
-                    'rel': request.get_linkrel(F_JSONLD),
+                    'rel': "join-source",
                     'title': l10n.translate('Join source details as RDF (JSON-LD)', request.locale),  # noqa
                     'href': f'{uri}/joins/{source_id}?f={F_JSONLD}'
                 }, {
                     'type': FORMAT_TYPES[F_HTML],
-                    'rel': request.get_linkrel(F_HTML),
+                    'rel': "join-source",
                     'title': l10n.translate('Join source details as HTML', request.locale),  # noqa
                     'href': f'{uri}/joins/{source_id}?f={F_HTML}'
                 }
@@ -544,7 +570,7 @@ def list_joins(api: API, request: APIRequest,
 
     # Build the response with proper structure
     # TODO: support pagination
-    response = {
+    output = {
         'links': [
             {
                 'type': FORMAT_TYPES[F_JSON],
@@ -574,7 +600,25 @@ def list_joins(api: API, request: APIRequest,
     # locale (or fallback default locale)
     l10n.set_response_language(headers, request.locale)
 
-    return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
+    if request.format == F_HTML:  # render
+        # HTML only: use provider to fetch key fields for dropdown
+        try:
+            provider_def = get_provider_by_type(
+                collections[dataset]['providers'], 'feature'
+            )
+            provider = load_plugin('provider', provider_def)
+            keys = provider.get_key_fields()
+        except ProviderTypeError:
+            LOGGER.warning(f'Feature provider not found for collection: '
+                           f'{dataset}', exc_info=True)
+            keys = {}
+
+        title = f'{collections[dataset]['title']} - Join Sources'
+        content = _render_html(api, request, dataset, 'collections/joins.html',
+                               title, output, key_fields=keys)
+        return headers, HTTPStatus.OK, content
+
+    return headers, HTTPStatus.OK, to_json(output, api.pretty_print)
 
 
 def join_details(api: API, request: APIRequest,
@@ -599,7 +643,7 @@ def join_details(api: API, request: APIRequest,
         details = join_util.read_join_source(dataset, join_id)
 
         uri = f'{api.get_collections_url()}/{dataset}'
-        response = {
+        output = {
             'id': join_id,
             'timeStamp': get_current_datetime(),
             'details': {
@@ -628,17 +672,17 @@ def join_details(api: API, request: APIRequest,
                     'href': f'{uri}/joins/{join_id}?f={F_HTML}'
                 }, {
                     'type': 'application/geo+json',
-                    'rel': 'results',
+                    'rel': 'items',
                     'title': 'Items with joined data as GeoJSON',
                     'href': f"{uri}/items?f={F_JSON}&joinId={join_id}",
                 }, {
                     'type': FORMAT_TYPES[F_JSONLD],
-                    'rel': 'results',
+                    'rel': 'items',
                     'title': 'Items with joined data as RDF (JSON-LD)',
                     'href': f"{uri}/items?f={F_JSONLD}&joinId={join_id}",  # noqa
                 }, {
                     'type': FORMAT_TYPES[F_HTML],
-                    'rel': 'results',
+                    'rel': 'items',
                     'title': 'Items with joined data items as HTML',
                     'href': f"{uri}/items?f={F_HTML}&joinId={join_id}",
                 }
@@ -662,7 +706,13 @@ def join_details(api: API, request: APIRequest,
     # locale (or fallback default locale)
     l10n.set_response_language(headers, request.locale)
 
-    return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
+    if request.format == F_HTML:  # render
+        title = f'{collections[dataset]['title']} - Join Source'
+        content = _render_html(api, request, dataset,
+                               'collections/joinsource.html', title, output)
+        return headers, HTTPStatus.OK, content
+
+    return headers, HTTPStatus.OK, to_json(output, api.pretty_print)
 
 
 def create_join(api: API, request: APIRequest,
@@ -711,7 +761,7 @@ def create_join(api: API, request: APIRequest,
 
         uri = f'{api.get_collections_url()}/{dataset}'
         join_id = details['id']
-        response = {
+        output = {
             'id': join_id,
             'timeStamp': get_current_datetime(),
             'details': {
@@ -740,17 +790,17 @@ def create_join(api: API, request: APIRequest,
                     'href': f'{uri}/joins/{join_id}?f={F_HTML}'
                 }, {
                     'type': 'application/geo+json',
-                    'rel': 'results',
+                    'rel': 'items',
                     'title': 'Items with joined data as GeoJSON',
                     'href': f"{uri}/items?f={F_JSON}&joinId={details['id']}",  # noqa
                 }, {
                     'type': FORMAT_TYPES[F_JSONLD],
-                    'rel': 'results',
+                    'rel': 'items',
                     'title': 'Items with joined data as RDF (JSON-LD)',
                     'href': f"{uri}/items?f={F_JSONLD}&joinId={details['id']}",  # noqa
                 }, {
                     'type': FORMAT_TYPES[F_HTML],
-                    'rel': 'results',
+                    'rel': 'items',
                     'title': 'Items with joined data as HTML',
                     'href': f"{uri}/items?f={F_HTML}&joinId={details['id']}",  # noqa
                 }
@@ -774,7 +824,15 @@ def create_join(api: API, request: APIRequest,
     # locale (or fallback default locale)
     l10n.set_response_language(headers, prv_locale, request.locale)
 
-    return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
+    if request.format == F_HTML:
+        # Render same page as join details to show result of POST
+        title = f'{collections[dataset]['title']} - Join Source'
+        content = _render_html(api, request, dataset,
+                               'collections/joinsource.html', title, output,
+                               description="Join source created successfully.")
+        return headers, HTTPStatus.OK, content
+
+    return headers, HTTPStatus.OK, to_json(output, api.pretty_print)
 
 
 def delete_join(api: API, request: APIRequest,
@@ -855,7 +913,7 @@ def key_fields(api: API, request: APIRequest,
     prv_locale = l10n.get_plugin_locale(provider_def, request.raw_locale)
 
     uri = f'{api.get_collections_url()}/{dataset}'
-    content = {
+    output = {
         'links': [
             {
                 'type': FORMAT_TYPES[F_JSON],
@@ -877,17 +935,23 @@ def key_fields(api: API, request: APIRequest,
         'keys': []
     }
 
-    for name, info in fields:
-        content['keys'].append({
+    for name, info in fields.items():
+        output['keys'].append({
             'id': name,
             'type': info.get('type'),  # not always set (e.g. for ID)
             'isDefault': info['default'],
-            'language': prv_locale.language  # TODO: is this really useful?
+            'language': prv_locale.language if prv_locale else request.locale.language  # noqa
         })
 
     # Set response language to requested provider locale
     # (if it supports language) and/or otherwise the requested pygeoapi
     # locale (or fallback default locale)
-    l10n.set_response_language(headers, prv_locale, request.locale)
+    l10n.set_response_language(headers, request.locale)
 
-    return headers, HTTPStatus.OK, to_json(content, api.pretty_print)
+    if request.format == F_HTML:  # render
+        title = f'{collections[dataset]['title']} - Key Fields'
+        output = _render_html(api, request, dataset, 'collections/keys.html',
+                              title, output)
+        return headers, HTTPStatus.OK, output
+
+    return headers, HTTPStatus.OK, to_json(output, api.pretty_print)

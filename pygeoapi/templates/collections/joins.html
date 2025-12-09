@@ -16,13 +16,21 @@
       </p>
       <h3>{% trans %}Joins{% endtrans %}</h3>
       <p>
-      {% trans %}
+      {% if data['joins'] %}
+        {% trans %}
           Below is a list of all available join sources for this collection.<br/>
-          If there aren't any joins, you can <a href="#create-join">create one</a>.
-      {% endtrans %}
+          If you don't find what you need, you may also <a href="#create-join">create one</a>.
+        {% endtrans %}
+      {% else %}
+        {% trans %}
+          There currently aren't any join sources for this collection.<br/>
+          However, you may wish to create one using the form below.
+        {% endtrans %}
+      {% endif %}
       </p>
       {% for join in data['joins'] %}
-        <h4>{{ join['id'] }} - {{ join['timeStamp'] }}</h4>
+        <h4>{{ join['id'] }}</h4>
+        <p>Created: {{ join['timeStamp'] }}</p>
         <ul>
         {% for link in join['links'] %}
             <li>
@@ -35,25 +43,35 @@
       {% endfor %}
     </section>
     <section id="create-join">
-      <h4>{% trans %}Upload a join source (CSV){% endtrans %}</h4>
+      <h3>{% trans %}Upload a join source (CSV){% endtrans %}</h3>
       <form method="POST" action="{{ data['dataset_path'] }}/joins" enctype="multipart/form-data" class="join-form">
         <!-- Required Fields -->
         <div class="form-group">
           <label for="collectionKey" class="required">
             {% trans %}Collection Key{% endtrans %} <span class="text-danger">*</span>
           </label>
+          {% if data['key_fields'] %}
           <select id="collectionKey"
                   name="collectionKey"
                   class="form-control"
                   required
                   aria-describedby="collectionKeyHelp">
             <option value="" disabled selected>{% trans %}Select a key field{% endtrans %}</option>
-            {% for key_field in data['key_fields'] %}
-              <option value="{{ key_field['id'] }}" {% if key_field.get('default', False) %}selected{% endif %}>
-                {{ key_field['id'] }}{% if key_field.get('default', False) %} ({% trans %}default{% endtrans %}){% endif %}
+            {% for key_name, key_value in data['key_fields'].items() %}
+              <option value="{{ key_name }}" {% if key_value.get('default', False) %}selected{% endif %}>
+                {{ key_name }}
               </option>
             {% endfor %}
           </select>
+          {% else %}
+          <input type="text"
+                 id="collectionKey"
+                 name="collectionKey"
+                 class="form-control"
+                 required
+                 placeholder="{% trans %}e.g., id{% endtrans %}"
+                 aria-describedby="collectionKeyHelp">
+          {% endif %}
           <small id="collectionKeyHelp" class="form-text text-muted">
             {% trans %}
                 Collection key field to join on.

@@ -49,9 +49,6 @@ _SOURCE_FILE_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# Stores references to join source files for quick lookup
-_REF_CACHE: dict[str, dict[str, dict[str, Any]]] = {}
-
 LOGGER = logging.getLogger(__name__)
 
 # Join configuration (set at end)
@@ -86,10 +83,32 @@ def _delete_source(path: Path, silent: bool = False) -> bool:
     return True
 
 
+@lru_cache(maxsize=None)
+def _source_ref_cache() -> dict:
+    """ Load source references from disk (cached until explicitly cleared). """
+    cache = {}
+
+    for file in _CONFIG.source_dir.iterdir():
+        if file.is_file() and _SOURCE_FILE_PATTERN.match(file.name):
+            with open(file, 'r') as f:
+                data = json.load(f)
+                collection_id = data['collectionName']
+                cache.setdefault(collection_id, {})[data['id']] = {
+                    'timeStamp': data['timeStamp'],
+                    'ref': file
+                }
+
+    return cache
+
+
 def _cleanup_sources():
     """
     Removes stale join source files, if a max age or limit was set.
-    This method has no effect if REF_CACHE is empty.
+    This method has no effect if there aren't any source references.
+
+    This method will also build the source reference cache, if empty.
+    If any source references were removed from disk, the cache will be
+    cleared and rebuilt afterward.
     """
     if not _CONFIG.enabled or (_CONFIG.max_days == 0 and
                                _CONFIG.max_files == 0):
@@ -97,43 +116,51 @@ def _cleanup_sources():
         # or auto-cleanup is not configured
         return
 
+    # Make sure we get the latest cache state
+    _source_ref_cache.cache_clear()
+
     now = datetime.now(timezone.utc)
     max_age = timedelta(days=_CONFIG.max_days)
     max_files = _CONFIG.max_files
-    for collection, sources in _REF_CACHE.items():
+    removed_count = 0
+    for collection, sources in _source_ref_cache().items():
         # sort sources by timestamp in ascending order
-        # and output as tuple (timestamp, source_id, ref)
+        # and output as tuple (timestamp, ref)
         source_items = sorted(
             [(datetime.strptime(info['timeStamp'], util.DATETIME_FORMAT).replace(tzinfo=timezone.utc),  # noqa
-              source_id, info['ref'])
-             for source_id, info in sources.items()],
+              info['ref']) for info in sources.values()],
             key=itemgetter(0)
         )
 
         # pass 1: limit by max_days (if configured)
         if max_age.days > 0:
-            for timestamp, source_id, ref in source_items:
+            for timestamp, ref in source_items:
                 if now - timestamp <= max_age:
                     continue
                 if _delete_source(ref, True):
-                    sources.pop(source_id, None)
+                    LOGGER.debug(f'removed stale source: {ref}')
+                    removed_count += 1
+                else:
+                    LOGGER.warning(f'could not remove stale source: {ref}')
 
         # pass 2: limit by max_files (if configured)
         if 0 < max_files < len(sources):
-            for _, source_id, ref in list(reversed(source_items))[:max_files]:
+            for _, ref in list(reversed(source_items))[:max_files]:
                 if _delete_source(ref, True):
-                    sources.pop(source_id, None)
+                    LOGGER.debug(f'removed stale source: {ref}')
+                    removed_count += 1
+                else:
+                    LOGGER.warning(f'could not remove stale source: {ref}')
 
-    # Check for and remove empty collections or join sources
-    for collection in list(_REF_CACHE.keys()):
-        # Remove empty/non-existent references
-        for source_id in list(_REF_CACHE[collection].keys()):
-            source_ref = _REF_CACHE[collection][source_id].get('ref')
-            if not isinstance(source_ref, Path) or not source_ref.is_file():
-                del _REF_CACHE[collection][source_id]
-        # Remove empty collection
-        if not _REF_CACHE[collection]:
-            del _REF_CACHE[collection]
+    if removed_count == 0:
+        # No sources were removed during cleanup: no reason to clear cache
+        return
+
+    # Clear the cache (again)
+    _source_ref_cache.cache_clear()
+
+    # Rebuild source reference cache so other methods don't have to
+    _source_ref_cache()
 
 
 def _make_source_path(join_id: str) -> Path:
@@ -155,13 +182,14 @@ def _find_source_path(collection_name: str, join_id: str) -> Path:
     Returns the join source file path for a specific feature collection
     and join ID. Raises KeyError if the reference wasn't found.
     """
+
     if not _CONFIG.enabled:
         LOGGER.debug(f'OGC API - Joins is disabled, cannot find join source '
                      f'{join_id} for collection {collection_name}')
         raise Exception('OGC API - Joins is disabled')
 
     try:
-        ref = _REF_CACHE[collection_name][join_id]['ref']
+        ref = _source_ref_cache()[collection_name][join_id]['ref']
     except KeyError:
         LOGGER.debug(f'join source {join_id} not found for '
                      f'collection {collection_name}', exc_info=True)
@@ -219,21 +247,7 @@ def init(config: dict) -> bool:
     if not enabled(config):
         return False
 
-    # Read all files from dir that match 'table-{uuid}.json'
-    # and build REF_CACHE
-    for file in _CONFIG.source_dir.iterdir():
-        if file.is_file() and _SOURCE_FILE_PATTERN.match(file.name):
-            with open(file, 'r') as f:
-                source_dict = json.load(f)
-                source_id = source_dict['id']
-                collection_name = source_dict['collectionName']
-                collection_dict = _REF_CACHE.setdefault(collection_name, {})
-                collection_dict[source_id] = {
-                    'timeStamp': source_dict['timeStamp'],
-                    'ref': file
-                }
-
-    # remove stale sources
+    # remove stale sources and build cache
     _cleanup_sources()
 
     LOGGER.info('OGC API - Joins initialized successfully')
@@ -408,19 +422,13 @@ def process_csv(collection_name: str, collection_provider: BaseProvider,
         "data": join_data
     }
 
-    # Lazily clean up stale sources
-    _cleanup_sources()
-
     # Store the output as JSON file named 'table-{uuid}.json'
     json_file = _make_source_path(source_id)
     with open(json_file, 'w', encoding='utf-8') as f:
         json.dump(output, f, indent=4)
 
-    # Update REF_CACHE (adding collection if not present)
-    _REF_CACHE.setdefault(collection_name, {})[source_id] = {
-        "timeStamp": created,
-        "ref": json_file
-    }
+    # Lazily clean up stale sources and rebuild cache
+    _cleanup_sources()
 
     return output
 
@@ -433,20 +441,18 @@ def list_sources(collection_name: str) -> dict:
 
     :returns: list of dict with source references
     """
+
     if not _CONFIG.enabled:
         LOGGER.debug(f'OGC API - Joins is disabled, cannot list sources '
                      f'for collection {collection_name}')
         raise Exception('OGC API - Joins is disabled')
 
-    return _REF_CACHE.get(collection_name, {})
+    return _source_ref_cache().get(collection_name, {})
 
 
-@lru_cache(maxsize=8)  # cache up to 8 sources for speed
-def read_join_source(collection_name: str,
-                     join_id: str) -> dict:
+def read_join_source(collection_name: str, join_id: str) -> dict:
     """
     Tries to read the join source file for a specific collection.
-    The resulting JSON dict is cached for reuse.
 
     :param collection_name: name of feature collection
     :param join_id: ID of the join data to retrieve
@@ -454,6 +460,7 @@ def read_join_source(collection_name: str,
     :returns: dict with join source data on success,
               otherwise an empty dict
     """
+
     if not _valid_id(join_id):
         raise ValueError('invalid join source ID')
 
@@ -464,8 +471,10 @@ def read_join_source(collection_name: str,
         return {}
 
     if not isinstance(ref, Path) or not ref.is_file():
-        # Unusual scenario: Path is set to empty or non-existing value
+        # Unusual scenario - path is set to empty or non-existing value:
+        # this could occur when the source was deleted by another process
         LOGGER.debug(f'empty or non-existing join source: {join_id}')
+        # Cleanup and rebuild to ensure cache is up-to-date
         _cleanup_sources()
         return {}
 
@@ -475,13 +484,12 @@ def read_join_source(collection_name: str,
     return source_dict
 
 
-def perform_join(feature_collection: dict, collection_name: str,
-                 join_id: str):
+def perform_join(features: dict, collection_name: str, join_id: str):
     """
     On-the-fly join of a join source table to a feature collection.
     The join will be in-place, so this method returns nothing.
 
-    :param feature_collection: feature collection to apply join to
+    :param features: feature collection or single feature to apply join to
     :param collection_name: name of feature collection
     :param join_id: ID of the join data source to retrieve
 
@@ -489,6 +497,10 @@ def perform_join(feature_collection: dict, collection_name: str,
              KeyError if the join source does not exist
     """
 
+    if not isinstance(features, dict):
+        raise ValueError('provide single feature or collection object')
+
+    type_ = features['type']
     source_dict = read_join_source(collection_name, join_id)
 
     # First perform join on each GeoJSON Feature
@@ -496,7 +508,9 @@ def perform_join(feature_collection: dict, collection_name: str,
     collection_key = source_dict['collectionKey']
     join_data = source_dict['data']
     join_fields = source_dict['joinFields']
-    for feature in feature_collection['features']:
+    is_collection = 'features' in features and type_ == 'FeatureCollection'
+    items = features['features'] if is_collection else [features]
+    for feature in items:
         # NOTE: look up key as string!
         key = str(feature['properties'].get(collection_key, ''))
         join_row = join_data.get(key, [])
@@ -509,8 +523,9 @@ def perform_join(feature_collection: dict, collection_name: str,
         else:
             feature['joined'] = False
 
-    # Now add join count as foreign member on FeatureCollection
-    feature_collection['numberJoined'] = join_count
+    # For FeatureCollections, add join count as foreign member
+    if is_collection:
+        features['numberJoined'] = join_count
 
 
 def remove_source(collection_name: str, join_id: str) -> bool:
@@ -526,16 +541,19 @@ def remove_source(collection_name: str, join_id: str) -> bool:
     if not _valid_id(join_id):
         raise ValueError('invalid join source ID')
 
-    collection = _REF_CACHE.get(collection_name, {})
+    collection = _source_ref_cache().get(collection_name, {})
     join_ref = collection.pop(join_id, None)
-    if not collection:
-        # No more sources for collection: delete key
-        del _REF_CACHE[collection_name]
     if not join_ref:
         # If the join was not found, we should answer with a 404
         return False
 
-    return _delete_source(join_ref.get('ref'))
+    # Remove the JSON file from disk
+    deleted = _delete_source(join_ref.get('ref'))
+
+    # Cleanup with explicit cache rebuild
+    _cleanup_sources()
+
+    return deleted
 
 
 @dataclass

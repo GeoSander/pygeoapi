@@ -74,6 +74,13 @@
             </div>
             <div class="row">
                 <div class="col-sm-12">
+                    {% if data['numberJoined'] %}
+                    <p>{% trans %}Items joined{% endtrans %}: {{ data['numberJoined'] }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-12">
                   {% trans %}Limit{% endtrans %}:
                   <select id="limits">
                     <option value="{{ config['server']['limits']['default_items'] }}">{{ config['server']['limits']['default_items'] }} ({% trans %}default{% endtrans %})</option>
@@ -124,7 +131,7 @@
                 <th>id</th>
               {% endif %}
 
-              {% for k in data['features'][0]['properties'].keys() %}
+              {% for k in data['columns'] %}
                 {% if k not in [data.id_field, data.title_field, data.uri_field, 'extent'] %}
                   {% set props = props.append(k) %}
                   <th>{{ k | striptags }}</th>

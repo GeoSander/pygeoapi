@@ -30,6 +30,7 @@
 import json
 import logging
 from enum import Enum
+from functools import lru_cache
 from http import HTTPStatus
 
 from pygeoapi.crs import DEFAULT_STORAGE_CRS, get_crs
@@ -101,6 +102,7 @@ class BaseProvider:
 
         raise NotImplementedError()
 
+    @lru_cache(maxsize=8)
     def get_key_fields(self) -> dict:
         """
         Get provider key field information (names, types, default)

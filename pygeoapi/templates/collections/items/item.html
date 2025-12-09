@@ -117,6 +117,17 @@
             </table>
         </div>
       </div>
+    {% if data['join_id'] %}
+      <div class="row">
+          <div class="col-sm-12">
+            {% if data['joined'] and data['joins_path'] %}
+                <p>{% trans %}Join source{% endtrans %} <a href="{{ data['joins_path'] }}/{{ data['join_id'] }}">{{ data['join_id'] }}</a> {% trans %}applied successfully (match){% endtrans %}.</p>
+            {% else %}
+              <p>{% trans %}Join source{% endtrans %} <a href="{{ data['joins_path'] }}/{{ data['join_id'] }}">{{ data['join_id'] }}</a> {% trans %}was not applied (no match){% endtrans %}.</p>
+            {% endif %}
+          </div>
+      </div>
+    {% endif %}
     </section>
 {% endblock %}
 

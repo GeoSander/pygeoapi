@@ -607,6 +607,7 @@ def get_collection_items(
                 'NoApplicableCode', msg
             )
 
+        # Add links to join source
         joins_uri = f'{api.get_collections_url()}/{dataset}/joins'
         content['links'].extend([{
             'type': FORMAT_TYPES[F_JSON],
@@ -712,6 +713,8 @@ def get_collection_items(
     l10n.set_response_language(headers, prv_locale, request.locale)
 
     if request.format == F_HTML:  # render
+        html_fields = frozenset(key for f in content['features']
+                                for key in f['properties'])
         tpl_config = api.get_dataset_templates(dataset)
         # For constructing proper URIs to items
 
@@ -722,6 +725,8 @@ def get_collection_items(
 
         content['offset'] = offset
 
+        content['join_id'] = join_id
+        content['columns'] = html_fields
         content['id_field'] = p.id_field
         if p.uri_field is not None:
             content['uri_field'] = p.uri_field
@@ -938,6 +943,7 @@ def get_collection_item(api: API, request: APIRequest,
             err.http_status_code, headers, request.format,
             err.ogc_exception_code, err.message)
 
+    join_id = None
     crs_transform_spec = None
     if provider_type == 'feature':
         # crs query parameter is only available for OGC API - Features
@@ -954,6 +960,10 @@ def get_collection_item(api: API, request: APIRequest,
                 HTTPStatus.BAD_REQUEST, headers, request.format,
                 'InvalidParameterValue', msg)
         set_content_crs_header(headers, provider_def, query_crs_uri)
+
+        # joinId query parameter also works for OGC API - Features only
+        LOGGER.debug('processing joinId parameter')
+        join_id = request.params.get('joinId')
 
     # Get provider language (if any)
     prv_locale = l10n.get_plugin_locale(provider_def, request.raw_locale)
@@ -1014,6 +1024,52 @@ def get_collection_item(api: API, request: APIRequest,
         'href': f'{api.get_collections_url()}/{dataset}'
     }])
 
+    joins_uri = None
+    if join_id:
+        # Post-process Feature and join with CSV data
+        try:
+            join_util.perform_join(content, dataset, join_id)
+        except ValueError as e:
+            LOGGER.error(f'Invalid request parameter: {e}',
+                         exc_info=True)
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', str(e))
+        except KeyError as e:
+            msg = 'Join source not found'
+            LOGGER.error(f'Unknown joinId: {e}',
+                         exc_info=True)
+            return api.get_exception(
+                HTTPStatus.NOT_FOUND, headers, request.format,
+                'NotFound', msg)
+        except Exception as e:
+            LOGGER.error(f'Failed to perform join: {e}',
+                         exc_info=True)
+            msg = f'Failed to perform join: {str(e)}'
+            return api.get_exception(
+                HTTPStatus.INTERNAL_SERVER_ERROR, headers, F_JSON,
+                'NoApplicableCode', msg
+            )
+
+        # Add links to join source
+        joins_uri = f'{api.get_collections_url()}/{dataset}/joins'
+        content['links'].extend([{
+            'type': FORMAT_TYPES[F_JSON],
+            'rel': request.get_linkrel(F_JSON),
+            'title': l10n.translate('Join source details as JSON', request.locale),  # noqa
+            'href': f'{joins_uri}/{join_id}?f={F_JSON}'
+        }, {
+            'type': FORMAT_TYPES[F_JSONLD],
+            'rel': request.get_linkrel(F_JSONLD),
+            'title': l10n.translate('Join source details as RDF (JSON-LD)', request.locale),  # noqa
+            'href': f'{joins_uri}/{join_id}?f={F_JSONLD}'
+        }, {
+            'type': FORMAT_TYPES[F_HTML],
+            'rel': request.get_linkrel(F_HTML),
+            'title': l10n.translate('Join source details as HTML', request.locale),  # noqa
+            'href': f'{joins_uri}/{join_id}?f={F_HTML}'
+        }])
+
     link_request_format = (
         request.format if request.format is not None else F_JSON
     )
@@ -1039,6 +1095,8 @@ def get_collection_item(api: API, request: APIRequest,
         tpl_config = api.get_dataset_templates(dataset)
         content['title'] = l10n.translate(collections[dataset]['title'],
                                           request.locale)
+        content['joins_path'] = joins_uri
+        content['join_id'] = join_id
         content['id_field'] = p.id_field
         if p.uri_field is not None:
             content['uri_field'] = p.uri_field
