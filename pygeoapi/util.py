@@ -287,7 +287,32 @@ def format_datetime(value: str, format_: str = DATETIME_FORMAT) -> str:
 
 def get_current_datetime(tz: timezone = timezone.utc,
                          format_: str = DATETIME_FORMAT) -> str:
+    """
+    Return current datetime as string in specified timezone and format.
+    By default, this returns a UTC ISO 8601 string.
+
+    :param format_: datetime format string (default: DATETIME_FORMAT)
+    :param tz: timezone to apply (default: UTC)
+
+    :returns: string
+    """
     return datetime.now(tz).strftime(format_)
+
+
+def str_to_datetime(timestamp: str, format_: str = DATETIME_FORMAT,
+                    tz=timezone.utc) -> datetime:
+    """
+    Parse a timestamp string (e.g. created by get_current_datetime())
+    into a datetime object.
+
+    :param timestamp: datetime string to parse
+    :param format_: datetime format string (default: DATETIME_FORMAT)
+    :param tz: timezone to apply (default: UTC)
+
+    :returns: timezone-aware datetime object
+    """
+    # strptime returns naive datetime, so add timezone
+    return datetime.strptime(timestamp, format_).replace(tzinfo=tz)
 
 
 def file_modified_iso8601(filepath: Path) -> str:

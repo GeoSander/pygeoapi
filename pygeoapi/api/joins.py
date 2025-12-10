@@ -28,8 +28,12 @@
 
 import logging
 from typing import Any
+from datetime import datetime, timedelta, timezone
 
-from pygeoapi import l10n, join_util
+from pygeoapi import l10n
+from pygeoapi.join.manager import (
+    JoinManager, JoinSourceNotFoundError, JoinSourceMissingError
+)
 from pygeoapi.api import (
     APIRequest, API, SYSTEM_LOCALE, FORMAT_TYPES,
     F_JSON, F_JSONLD, F_HTML, HTTPStatus
@@ -39,7 +43,8 @@ from pygeoapi.plugin import load_plugin
 from pygeoapi.provider.base import ProviderTypeError, ProviderGenericError
 from pygeoapi.util import (
     get_provider_by_type, to_json, filter_providers_by_type,
-    filter_dict_by_key_value, get_current_datetime, render_j2_template
+    filter_dict_by_key_value, get_current_datetime, render_j2_template,
+    str_to_datetime
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -707,6 +712,12 @@ def join_details(api: API, request: APIRequest,
     l10n.set_response_language(headers, request.locale)
 
     if request.format == F_HTML:  # render
+        join_created = str_to_datetime(output['details']['created'])
+        if datetime.now(timezone.utc) - join_created < timedelta(seconds=10):
+            # If join is less than 10 seconds old, we were probably redirected
+            # by create_join(): add a message that join was successful
+            output['description'] = l10n.translate(
+                'Join source created successfully.', request.locale)
         title = f'{collections[dataset]['title']} - Join Source'
         content = _render_html(api, request, dataset,
                                'collections/joinsource.html', title, output)
@@ -761,6 +772,19 @@ def create_join(api: API, request: APIRequest,
 
         uri = f'{api.get_collections_url()}/{dataset}'
         join_id = details['id']
+
+        # Set response language to requested provider locale
+        # (if it supports language) and/or otherwise the requested pygeoapi
+        # locale (or fallback default locale)
+        l10n.set_response_language(headers, prv_locale, request.locale)
+
+        if request.format == F_HTML:
+            # For HTML only, we'll redirect to the join details page instead
+            # to avoid form resubmission. This is known as the PRG pattern:
+            # https://en.wikipedia.org/wiki/Post/Redirect/Get
+            headers['Location'] = f'{uri}/joins/{join_id}'
+            return headers, HTTPStatus.SEE_OTHER, 'created successfully'
+
         output = {
             'id': join_id,
             'timeStamp': get_current_datetime(),
@@ -818,19 +842,6 @@ def create_join(api: API, request: APIRequest,
         LOGGER.error(f'Failed to create join: {e}', exc_info=True)
         msg = f'Failed to create join: {str(e)}'
         return _server_error(api, request, headers, msg)
-
-    # Set response language to requested provider locale
-    # (if it supports language) and/or otherwise the requested pygeoapi
-    # locale (or fallback default locale)
-    l10n.set_response_language(headers, prv_locale, request.locale)
-
-    if request.format == F_HTML:
-        # Render same page as join details to show result of POST
-        title = f'{collections[dataset]['title']} - Join Source'
-        content = _render_html(api, request, dataset,
-                               'collections/joinsource.html', title, output,
-                               description="Join source created successfully.")
-        return headers, HTTPStatus.OK, content
 
     return headers, HTTPStatus.OK, to_json(output, api.pretty_print)
 

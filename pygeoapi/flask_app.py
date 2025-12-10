@@ -436,8 +436,8 @@ def joins(collection_id, joinId=None):
                                       collection_id, joinId)
     elif request.method == 'POST':
         # Create a new join
-        return execute_from_flask(joins_api.create_join, request,
-                                  collection_id)
+        return execute_from_flask(joins_api.create_join,
+                                  request, collection_id)
     else:
         # Delete an existing join
         return execute_from_flask(joins_api.delete_join, request,
