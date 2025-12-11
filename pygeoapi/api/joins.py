@@ -73,16 +73,16 @@ CONFORMANCE_CLASSES = [
 ]
 
 
-def init(cfg: dict) -> bool:
+def get_manager(cfg: dict) -> JoinManager | None:
     """
-    Shortcut to initialize join utility with config.
+    Shortcut to initialize a JoinManager instance.
     Called dynamically by the main `API.__init__` method.
 
     :param cfg: pygeoapi configuration dict
 
-    :returns: True if OGC API - Joins is available and initialized
+    :returns: `JoinManager` instance or None (if OGC API - Joins is disabled)
     """
-    return join_util.init(cfg)
+    return JoinManager.from_config(cfg)
 
 
 def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, dict]]:  # noqa
@@ -97,7 +97,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
 
     paths = {}
 
-    if not join_util.enabled(cfg):
+    if not get_manager(cfg):
         LOGGER.info('OpenAPI: skipping OGC API - Joins endpoints setup')
         return [], {'paths': paths}
 
@@ -540,7 +540,7 @@ def list_joins(api: API, request: APIRequest,
         return _not_found(api, request, headers, msg)
 
     try:
-        sources = join_util.list_sources(dataset)
+        sources = api.join_manager.list_sources(dataset)
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
         return _server_error(api, request, headers, str(e))
@@ -645,7 +645,7 @@ def join_details(api: API, request: APIRequest,
         return _not_found(api, request, headers, msg)
 
     try:
-        details = join_util.read_join_source(dataset, join_id)
+        details = api.join_manager.read_join_source(dataset, join_id)
 
         uri = f'{api.get_collections_url()}/{dataset}'
         output = {
@@ -697,10 +697,9 @@ def join_details(api: API, request: APIRequest,
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
         return _bad_request(api, request, headers, str(e))
-    except KeyError as e:
-        msg = 'Collection or join source not found'
-        LOGGER.error(f'Invalid parameter value: {e}', exc_info=True)
-        return _not_found(api, request, headers, msg)
+    except (JoinSourceNotFoundError, JoinSourceMissingError) as e:
+        LOGGER.error(f'{e}', exc_info=True)
+        return _not_found(api, request, headers, str(e))
     except Exception as e:
         LOGGER.error(f'Failed to retrieve join: {e}', exc_info=True)
         msg = f'Failed to retrieve join: {str(e)}'
@@ -739,7 +738,7 @@ def create_join(api: API, request: APIRequest,
     """
     headers, collections, dataset = _prepare(api, request, collection)
 
-    if not api.supports_joins:
+    if not api.join_manager:
         # TODO: perhaps a 406 Not Acceptable would be better?
         msg = 'OGC API - Joins is not available on this instance'
         return _server_error(api, request, headers, msg)
@@ -768,7 +767,7 @@ def create_join(api: API, request: APIRequest,
         # Get provider locale (if any)
         prv_locale = l10n.get_plugin_locale(provider_def, request.raw_locale)
 
-        details = join_util.process_csv(dataset, provider, request.form)
+        details = api.join_manager.process_csv(dataset, provider, request.form)
 
         uri = f'{api.get_collections_url()}/{dataset}'
         join_id = details['id']
@@ -865,13 +864,14 @@ def delete_join(api: API, request: APIRequest,
         return _not_found(api, request, headers, msg)
 
     try:
-        if not join_util.remove_source(dataset, join_id):
+        if not api.join_manager.remove_source(dataset, join_id):
             msg = f'Join source {join_id} not found for collection {dataset}'
             return _not_found(api, request, headers, msg)
     except ValueError as e:
         LOGGER.error(f'Invalid request parameter: {e}', exc_info=True)
         return _bad_request(api, request, headers, str(e))
     except Exception as e:
+        # e.g. unable to delete file from disk
         LOGGER.error(f'Failed to delete join source: {e}',
                      exc_info=True)
         msg = f'Failed to delete join: {str(e)}'

@@ -637,15 +637,14 @@ class API:
         self.api_headers = get_api_rules(self.config).response_headers
         self.base_url = get_base_url(self.config)
         self.prefetcher = UrlPrefetcher()
-        self.supports_joins = False
+        self.join_manager = None
 
         setup_logger(self.config['logging'])
 
-        joins_init = getattr(all_apis().get('joins', object()), 'init', None)
-        if callable(joins_init):
-            # Initialize OGC API - Joins:
-            # build reference cache of join tables already/still on the server
-            self.supports_joins = joins_init(config)
+        join_manager = getattr(all_apis().get('joins', object()), 'get_manager', None)  # noqa
+        if callable(join_manager):
+            # Init OGC API - Joins manager (or set to None if not configured)
+            self.join_manager = join_manager(config)
 
         CHARSET[0] = config['server'].get('encoding', 'utf-8')
         if config['server'].get('gzip'):
@@ -920,7 +919,7 @@ def conformance(api: API, request: APIRequest) -> Tuple[dict, int, str]:
                         apis_dict['itemtypes'].CONFORMANCE_CLASSES_FEATURES)
                     # If it's an OGC API - Features provider and joins is
                     # supported, we can also add conformance classes for it
-                    if api.supports_joins:
+                    if api.join_manager:
                         conformance_list.extend(
                             apis_dict['joins'].CONFORMANCE_CLASSES)
                 if provider['type'] == 'record':
@@ -1184,7 +1183,7 @@ def describe_collections(api: API, request: APIRequest,
                     'href': f'{api.get_collections_url()}/{k}/items?f={value.f}'  # noqa
                 })
 
-            if api.supports_joins and collection_data_type == 'feature':
+            if api.join_manager and collection_data_type == 'feature':
                 # Add links to available OGC API - Joins sources, if any
                 collection['links'].extend([{
                     'type': FORMAT_TYPES[F_JSON],
@@ -1440,7 +1439,7 @@ def describe_collections(api: API, request: APIRequest,
         })
 
     if request.format == F_HTML:  # render
-        fcm['supports_joins'] = api.supports_joins
+        fcm['supports_joins'] = api.join_manager is not None
         fcm['base_url'] = api.base_url
         fcm['collections_path'] = api.get_collections_url()
         if dataset is not None:

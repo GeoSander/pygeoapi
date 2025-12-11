@@ -47,7 +47,7 @@ from pygeofilter.parsers.ecql import parse as parse_ecql_text
 from pygeofilter.parsers.cql2_json import parse as parse_cql2_json
 from pyproj.exceptions import CRSError
 
-from pygeoapi import l10n, join_util
+from pygeoapi import l10n
 from pygeoapi.api import evaluate_limit
 from pygeoapi.crs import (DEFAULT_CRS, DEFAULT_STORAGE_CRS,
                           create_crs_transform_spec, get_supported_crs_list,
@@ -59,7 +59,8 @@ from pygeoapi.openapi import get_oas_30_parameters
 from pygeoapi.plugin import load_plugin, PLUGINS
 from pygeoapi.provider.base import (
     ProviderGenericError, ProviderTypeError, SchemaType)
-
+from pygeoapi.join.manager import (
+    JoinManager, JoinSourceMissingError, JoinSourceNotFoundError)
 from pygeoapi.util import (filter_providers_by_type, to_json,
                            filter_dict_by_key_value, str2bool,
                            get_provider_by_type, render_j2_template,
@@ -584,20 +585,18 @@ def get_collection_items(
     if join_id:
         # Post-process FeatureCollection and join with CSV data
         try:
-            join_util.perform_join(content, dataset, join_id)
+            api.join_manager.perform_join(content, dataset, join_id)
         except ValueError as e:
             LOGGER.error(f'Invalid request parameter: {e}',
                          exc_info=True)
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST, headers, request.format,
                 'InvalidParameterValue', str(e))
-        except KeyError as e:
-            msg = 'Join source not found'
-            LOGGER.error(f'Unknown joinId: {e}',
-                         exc_info=True)
+        except (JoinSourceNotFoundError, JoinSourceMissingError) as e:
+            LOGGER.error(f'{e}', exc_info=True)
             return api.get_exception(
                 HTTPStatus.NOT_FOUND, headers, request.format,
-                'NotFound', msg)
+                'NotFound', str(e))
         except Exception as e:
             LOGGER.error(f'Failed to perform join: {e}',
                          exc_info=True)
@@ -1028,20 +1027,18 @@ def get_collection_item(api: API, request: APIRequest,
     if join_id:
         # Post-process Feature and join with CSV data
         try:
-            join_util.perform_join(content, dataset, join_id)
+            api.join_manager.perform_join(content, dataset, join_id)
         except ValueError as e:
             LOGGER.error(f'Invalid request parameter: {e}',
                          exc_info=True)
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST, headers, request.format,
                 'InvalidParameterValue', str(e))
-        except KeyError as e:
-            msg = 'Join source not found'
-            LOGGER.error(f'Unknown joinId: {e}',
-                         exc_info=True)
+        except (JoinSourceNotFoundError, JoinSourceMissingError) as e:
+            LOGGER.error(f'{e}', exc_info=True)
             return api.get_exception(
                 HTTPStatus.NOT_FOUND, headers, request.format,
-                'NotFound', msg)
+                'NotFound', str(e))
         except Exception as e:
             LOGGER.error(f'Failed to perform join: {e}',
                          exc_info=True)
@@ -1133,7 +1130,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
     from pygeoapi.openapi import OPENAPI_YAML, get_visible_collections
 
     # We should add a joinId query parameter if OGC API - Joins is enabled
-    joins_enabled = join_util.enabled(cfg)
+    joins_enabled = JoinManager.configured(cfg)
 
     join_id_param = {
         'name': 'joinId',
@@ -1435,9 +1432,13 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 }
             }
 
+            if joins_enabled:
+                # Inject joinId parameter into GET /items/{featureId} operation
+                paths[f'{items_path}/{{featureId}}']['get']['parameters'].append(join_id_param)  # noqa
+
             try:
                 schema_ref = p.get_schema()
-                paths[f'{collection_name_path}/items/{{featureId}}']['get']['responses']['200'] = {  # noqa
+                paths[f'{items_path}/{{featureId}}']['get']['responses']['200'] = {  # noqa
                     'content': {
                         schema_ref[0]: {
                             'schema': schema_ref[1]

@@ -78,7 +78,8 @@ class JoinManager:
         self._cleanup_sources()
 
         LOGGER.debug(
-            f'JoinManager initialized with source_dir: {self._source_dir}')
+            f'{self.__class__.__name__} initialized with source_dir: '
+            f'{self._source_dir}')
 
     @property
     def source_dir(self) -> Path:
@@ -95,6 +96,16 @@ class JoinManager:
         """Maximum number of join source files to keep at any time."""
         return self._max_files
 
+    @staticmethod
+    def configured(config: dict) -> bool:
+        """Quick check to see if OGC API - Joins section is present in the
+        pygeoapi config dict, without actually initializing a JoinManager."""
+        try:
+            return 'joins' in config.get('server', {})
+        except KeyError:
+            # pygeoapi was configured without OGC API - Joins
+            return False
+
     @classmethod
     def from_config(cls, config: dict) -> Optional['JoinManager']:
         """
@@ -108,6 +119,7 @@ class JoinManager:
             joins_config = config.get('server', {})['joins']
         except KeyError:
             # pygeoapi was configured without OGC API - Joins:
+            LOGGER.debug('pygeoapi server.joins not configured')
             return None
 
         # Check if 'joins' key was set, but without further configuration
@@ -156,10 +168,9 @@ class JoinManager:
         # Create and return manager
         try:
             manager = cls(source_dir, max_days=max_days, max_files=max_files)
-            LOGGER.debug('JoinManager successfully created')
             return manager
         except Exception as e:
-            LOGGER.error(f'Failed to create JoinManager: {e}')
+            LOGGER.error(f'Failed to initialize {cls.__name__}: {e}')
             return None
 
     @contextmanager
@@ -649,7 +660,7 @@ class JoinManager:
             # Source file was removed, but reference still existed: 200
             return True
 
-        # Remove the JSON file from disk
+        # Remove the JSON file from disk (note: this is noisy)
         deleted = self._delete_source(source_path)
 
         # Remove reference (clean up orphan)
