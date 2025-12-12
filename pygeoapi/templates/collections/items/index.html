@@ -152,13 +152,13 @@
                 {% elif data.get('title_field') %}
                   {% set title_field = data.title_field %}
                   <td data-label="{{ title_field }}">
-                    <a href="{{ data.items_path }}/{{ ft['id'] }}" title="{{ ft.properties.get(title_field) }}">
+                    <a href="{{ data.items_path }}/{{ ft['id'] }}{% if data['join_id'] %}?joinId={{ data.join_id }}{% endif %}" title="{{ ft.properties.get(title_field) }}">
                       {{ ft.properties.get(title_field) | string | truncate( 35 ) }}
                     </a>
                   </td>
                 {% else %}
                   <td data-label="id">
-                    <a href="{{ data.items_path }}/{{ ft.id }}" title="{{ ft.id }}">
+                    <a href="{{ data.items_path }}/{{ ft.id }}{% if data['join_id'] %}?joinId={{ data.join_id }}{% endif %}" title="{{ ft.id }}">
                       {{ ft.id | string | truncate( 12 )  }}
                     </a>
                   </td>

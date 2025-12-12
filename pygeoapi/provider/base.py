@@ -129,7 +129,7 @@ class BaseProvider:
                 return {self.id_field: {'default': True}}
 
         for key in self._keys:
-            key_name = key['id']
+            key_name = key['name']
 
             is_default = key.get('default', False)
             if is_default:

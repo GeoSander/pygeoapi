@@ -610,17 +610,17 @@ def get_collection_items(
         joins_uri = f'{api.get_collections_url()}/{dataset}/joins'
         content['links'].extend([{
             'type': FORMAT_TYPES[F_JSON],
-            'rel': request.get_linkrel(F_JSON),
+            'rel': 'join-source',
             'title': l10n.translate('Join source details as JSON', request.locale),  # noqa
             'href': f'{joins_uri}/{join_id}?f={F_JSON}'
         }, {
             'type': FORMAT_TYPES[F_JSONLD],
-            'rel': request.get_linkrel(F_JSONLD),
+            'rel': 'join-source',
             'title': l10n.translate('Join source details as RDF (JSON-LD)', request.locale),  # noqa
             'href': f'{joins_uri}/{join_id}?f={F_JSONLD}'
         }, {
             'type': FORMAT_TYPES[F_HTML],
-            'rel': request.get_linkrel(F_HTML),
+            'rel': 'join-source',
             'title': l10n.translate('Join source details as HTML', request.locale),  # noqa
             'href': f'{joins_uri}/{join_id}?f={F_HTML}'
         }])
@@ -712,18 +712,26 @@ def get_collection_items(
     l10n.set_response_language(headers, prv_locale, request.locale)
 
     if request.format == F_HTML:  # render
-        html_fields = frozenset(key for f in content['features']
-                                for key in f['properties'])
+        # To render a property table, we need to know all properties
+        if join_id:
+            # When a join is applied, we should inspect all features
+            # because only the joined features will contain joined properties
+            html_fields = list({key for f in content['features']
+                                for key in f['properties']})
+        elif content['features']:
+            # ... otherwise simply get the first feature's properties
+            html_fields = list(content['features'][0]['properties'].keys())
+        else:
+            # ... or set to empty list if no features are available
+            html_fields = []
         tpl_config = api.get_dataset_templates(dataset)
-        # For constructing proper URIs to items
 
+        # Inject parameters for template logic
         content['itemtype'] = p.type
         content['items_path'] = uri
         content['dataset_path'] = '/'.join(uri.split('/')[:-1])
         content['collections_path'] = api.get_collections_url()
-
         content['offset'] = offset
-
         content['join_id'] = join_id
         content['columns'] = html_fields
         content['id_field'] = p.id_field
@@ -743,6 +751,7 @@ def get_collection_items(
                      v.f == request.format][0]
 
         try:
+            # TODO: make sure that writers output all fields (also joined ones)
             content = formatter.write(
                 data=content,
                 options={
@@ -771,6 +780,7 @@ def get_collection_items(
         return headers, HTTPStatus.OK, content
 
     elif request.format == F_JSONLD:
+        # TODO: Add joinId to item links if set
         content = geojson2jsonld(
             api, content, dataset, id_field=(p.uri_field or 'id')
         )
@@ -1052,17 +1062,17 @@ def get_collection_item(api: API, request: APIRequest,
         joins_uri = f'{api.get_collections_url()}/{dataset}/joins'
         content['links'].extend([{
             'type': FORMAT_TYPES[F_JSON],
-            'rel': request.get_linkrel(F_JSON),
+            'rel': 'join-source',
             'title': l10n.translate('Join source details as JSON', request.locale),  # noqa
             'href': f'{joins_uri}/{join_id}?f={F_JSON}'
         }, {
             'type': FORMAT_TYPES[F_JSONLD],
-            'rel': request.get_linkrel(F_JSONLD),
+            'rel': 'join-source',
             'title': l10n.translate('Join source details as RDF (JSON-LD)', request.locale),  # noqa
             'href': f'{joins_uri}/{join_id}?f={F_JSONLD}'
         }, {
             'type': FORMAT_TYPES[F_HTML],
-            'rel': request.get_linkrel(F_HTML),
+            'rel': 'join-source',
             'title': l10n.translate('Join source details as HTML', request.locale),  # noqa
             'href': f'{joins_uri}/{join_id}?f={F_HTML}'
         }])

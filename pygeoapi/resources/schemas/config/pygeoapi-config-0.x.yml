@@ -545,9 +545,9 @@ properties:
                                           items:
                                               type: object
                                               properties:
-                                                  id:
+                                                  name:
                                                       type: string
-                                                      description: identifier (name) of the key field
+                                                      description: (qualified) name of the key field
                                                   # title:   TODO
                                                   #     type: string
                                                   #     description: optional name of a related title lookup field

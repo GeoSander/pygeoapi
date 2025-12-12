@@ -73,6 +73,22 @@ def config():
     }
 
 
+@pytest.fixture()
+def config_with_keys():
+    return {
+        'name': 'GeoJSON',
+        'type': 'feature',
+        'data': path,
+        'id_field': 'id',
+        'key_fields': [
+            {
+                'name': 'foo',
+                'default': True
+            }
+        ]
+    }
+
+
 def test_query(fixture, config):
     p = GeoJSONProvider(config)
 
@@ -174,9 +190,16 @@ def test_update(fixture, config):
     assert 'Null' in results['properties']['name']
 
 
-def test_key_fields(fixture, config):
+def test_key_fields(fixture, config, config_with_keys):
     p = GeoJSONProvider(config)
     key_fields = p.get_key_fields()
     assert len(key_fields) == 1
     assert key_fields['id'].get('type') is None  # GeoJSON provider ignores ID
     assert key_fields['id']['default'] is True
+
+    p = GeoJSONProvider(config_with_keys)
+    key_fields = p.get_key_fields()
+    assert len(key_fields) == 2
+    assert key_fields['id']['default'] is False
+    assert key_fields['foo']['type'] == 'string'
+    assert key_fields['foo']['default'] is True

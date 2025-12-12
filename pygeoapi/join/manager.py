@@ -78,7 +78,7 @@ class JoinManager:
         self._cleanup_sources()
 
         LOGGER.debug(
-            f'{self.__class__.__name__} initialized with source_dir: '
+            f'{self.__class__.__name__} initialized with source directory: '
             f'{self._source_dir}')
 
     @property
@@ -129,27 +129,25 @@ class JoinManager:
 
         source_dir = Path(tempfile.gettempdir())
         conf_source_dir = joins_config.get('source_dir')
-        try:
-            if conf_source_dir:
-                conf_source_dir = Path(conf_source_dir).resolve()
+        if conf_source_dir:
+            conf_source_dir = Path(conf_source_dir).resolve()
+            LOGGER.debug(f'{cls.__name__} source_dir configured as: '
+                         f'{conf_source_dir}')
+            try:
                 # Make sure that the directory exists (recursively)
                 # NOTE: if user configured 'temp_dir' with a file path
                 #       and the file exists, this will raise an error
                 conf_source_dir.mkdir(parents=True, exist_ok=True)
-                source_dir = conf_source_dir
-
-            # Test write permissions
-            test_file = source_dir / '.write_test'
-            test_file.touch()
-            test_file.unlink()
-
-        except (OSError, PermissionError, FileExistsError) as e:
-            LOGGER.error(
-                f'Cannot access or write to source_dir {source_dir}: {e}',
-                exc_info=True
-            )
-            LOGGER.debug('OGC API - Joins will be unavailable')
-            return None
+            except Exception as e:
+                LOGGER.error(
+                    f'Cannot access or write to join source '
+                    f'directory: {e}', exc_info=True)
+                LOGGER.debug('OGC API - Joins will be unavailable')
+                return None
+            source_dir = conf_source_dir
+        else:
+            LOGGER.debug(f'no {cls.__name__} source_dir configured, '
+                         f'defaulting to tempdir: {source_dir}')
 
         # Validate numeric settings
         max_days = joins_config.get('max_days', 0)
@@ -171,6 +169,7 @@ class JoinManager:
             return manager
         except Exception as e:
             LOGGER.error(f'Failed to initialize {cls.__name__}: {e}')
+            LOGGER.debug('OGC API - Joins will be unavailable')
             return None
 
     @contextmanager
