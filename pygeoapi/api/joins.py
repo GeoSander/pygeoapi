@@ -680,13 +680,7 @@ def join_details(api: API, request: APIRequest,
                     'rel': 'items',
                     'title': 'Items with joined data as GeoJSON',
                     'href': f"{uri}/items?f={F_JSON}&joinId={join_id}",
-                }, {
-                # TODO
-                #     'type': FORMAT_TYPES[F_JSONLD],
-                #     'rel': 'items',
-                #     'title': 'Items with joined data as RDF (JSON-LD)',
-                #     'href': f"{uri}/items?f={F_JSONLD}&joinId={join_id}",  # noqa
-                # }, {
+                }, {  # TODO: RDF/JSON-LD
                     'type': FORMAT_TYPES[F_HTML],
                     'rel': 'items',
                     'title': 'Items with joined data items as HTML',
@@ -817,13 +811,7 @@ def create_join(api: API, request: APIRequest,
                     'rel': 'items',
                     'title': 'Items with joined data as GeoJSON',
                     'href': f"{uri}/items?f={F_JSON}&joinId={details['id']}",  # noqa
-                }, {
-                # TODO
-                #     'type': FORMAT_TYPES[F_JSONLD],
-                #     'rel': 'items',
-                #     'title': 'Items with joined data as RDF (JSON-LD)',
-                #     'href': f"{uri}/items?f={F_JSONLD}&joinId={details['id']}",  # noqa
-                # }, {
+                }, {  # TODO: RDF/JSON-LD
                     'type': FORMAT_TYPES[F_HTML],
                     'rel': 'items',
                     'title': 'Items with joined data as HTML',

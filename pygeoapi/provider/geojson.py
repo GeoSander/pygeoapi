@@ -119,6 +119,15 @@ class GeoJSONProvider(BaseProvider):
         # Must be a FeatureCollection
         assert data['type'] == 'FeatureCollection'
 
+        # Remove links: this can mess up pygeoapi (as it also adds them)
+        if 'links' in data:
+            LOGGER.debug(f'removing links from {self.name} FeatureCollection')
+            del data['links']
+        for f in data['features']:
+            LOGGER.debug(f'removing links from {self.name} features')
+            if 'links' in f:
+                del f['links']
+
         # filter by properties if set
         if properties:
             data['features'] = [f for f in data['features'] if \

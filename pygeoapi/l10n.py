@@ -84,7 +84,7 @@ def str2locale(value: str, silent: bool = False) -> Union[Locale, None]:
         if not silent:
             raise LocaleError(f"invalid locale '{value}'")
     except _UnknownLocaleError as err:
-        LOGGER.warning(err)
+        LOGGER.debug(err)
         if not silent:
             raise LocaleError(err)
     else:
