@@ -428,17 +428,46 @@ If you wish to store the join source files in a *specific* directory, you can sp
 Automatic cleanup
 ^^^^^^^^^^^^^^^^^
 
-Without any further configuration, the amount of join source files could grow indefinitely.
-To control the number of files and/or days they are stored, you can set the following parameters:
+Without any further configuration, the amount of join source files could grow indefinitely (not recommended).
+To control the number of files and/or days they are stored *for each collection*, you can set the following parameters:
 
 - `max_files`
 - `max_days`
 
-Both parameters can be set to an integer. If omitted, no cleanup rule will be set.
+Both parameters can be set to an integer. If omitted, **no cleanup rule** will be set.
 Note that the settings are *not* mutually exclusive: you can also set both options.
 
 The automatic cleanup is a lazy process and does not run as a scheduled background task: the process will only run
 when a new join source file is uploaded or when pygeoapi initializes (if OGC API - Joins is enabled).
+
+Key fields
+^^^^^^^^^^
+
+For *feature collections* only, you may define some key fields on which a join can be performed.
+These key fields are defined in the `providers` section of the collection configuration.
+
+Key fields must be of type `string` or `integer`. Joining on (e.g.) dates or floats is not possible.
+
+An example configuration could look like this:
+
+.. code-block:: yaml
+providers:
+    - type: feature
+      name: GeoJSON
+      data: tests/data/dutch_municipalities.json
+      key_fields:
+        - name: jaarcode
+        - name: statcode
+          default: true
+        - name: jrstatcode
+
+Note that 3 key fields have been defined above (`jaarcode`, `statcode`, `jrstatcode`),
+for which `statcode` is marked as the default field. In that case, that field will be used
+as the field to join on if nothing was specified.
+
+Be aware that if you do not specify any key field, the feature identifier (e.g. `id`) will be used
+as the default field to join on. In fact, the feature identifier will always be included as a key field,
+even if specific key fields were configured.
 
 
 .. _API Design Rules:
